@@ -1,0 +1,3 @@
+# Byond persists state instead of staying disposable
+
+Typical Docker dev containers are treated as disposable — rebuild from the Dockerfile and start clean. Byond deliberately breaks that convention: the Byond User's entire `$HOME` (Home Volume) and Homebrew's install directory (Brew Volume) live on named volumes that survive `docker compose down`/`up` and even image rebuilds, and the service runs with `restart: unless-stopped`. This trades the usual reproducible, drift-free container guarantee for a persistent, VM-like machine the user can keep customizing — brew-installed tools, dotfiles, an already-logged-in Claude session — without redoing that work every time.

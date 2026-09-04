@@ -1,0 +1,17 @@
+services:
+  byond:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: byond
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    volumes:
+      - ${HOST_WORKSPACE_PATH}:/workspace
+      - byond_home:/home/byond
+      - byond_brew:/home/linuxbrew/.linuxbrew
+
+volumes:
+  byond_home:
+  byond_brew:
