@@ -50,7 +50,7 @@ git -C <repo_path> diff origin/<base_branch>..<integration-branch> --stat
 git -C <repo_path> diff origin/<base_branch>..<integration-branch>
 ```
 
-Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (see "PR body template") to `<dir>/pr/<repo>.md` with the `<<RELATED_PRS>>`, `<<DEPENDS_ON>>` and `<<SHIPS_WITH>>` placeholders left in place (PR numbers do not exist yet; the WARNING alert's "Merge together with" line is left out until step 3).
+Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (see "PR body template") to `<dir>/pr/<repo>.md` and save a copy as `<dir>/pr/<repo>.placeholders.md`, with the `<<RELATED_PRS>>`, `<<DEPENDS_ON>>` and `<<SHIPS_WITH>>` placeholders left in place (PR numbers do not exist yet; the WARNING alert's "Merge together with" line is left out until step 3).
 
 **Review loop before saving.** Re-read the draft as a teammate who has seen neither the diff nor the tickets, fix what fails, and re-read, up to 3 rounds:
 
@@ -68,7 +68,7 @@ Show one table before the first push: repo, integration branch, title, base, PR 
 
 Then for each repo that needs a PR, in merge order:
 
-1. Copy the body and fill the placeholders with what is known so far (see "Depends on and Related PRs" and the `<<SHIPS_WITH>>` row of the placeholder table), and write it back to `<dir>/pr/<repo>.md`.
+1. Copy the body from `<dir>/pr/<repo>.placeholders.md` (keep that file as it is) and fill the placeholders with what is known so far (see "Depends on and Related PRs" and the `<<SHIPS_WITH>>` row of the placeholder table), and write it back to `<dir>/pr/<repo>.md`.
 2. Push and open the draft:
 
 ```
@@ -80,7 +80,7 @@ gh pr create --draft --base <base_branch> --head <integration-branch> --title "<
 
 ### 4. Backfill
 
-An early PR cannot list siblings created after it. Once all PRs exist, for each PR **created in this run** whose Related PRs or Ships with is now incomplete, rebuild its body from the placeholder version with the complete lists (Ships with and the alert's "Merge together with" line are rebuilt from the same data), write it to `<dir>/pr/<repo>.md` and `gh pr edit <url> --body-file <dir>/pr/<repo>.md`. Skip when fewer than two PRs exist.
+An early PR cannot list siblings created after it. Once all PRs exist, for each PR **created in this run** whose Related PRs or Ships with is now incomplete, rebuild its body from `<dir>/pr/<repo>.placeholders.md` with the complete lists (Ships with and the alert's "Merge together with" line are rebuilt from the same data), write it to `<dir>/pr/<repo>.md` and `gh pr edit <url> --body-file <dir>/pr/<repo>.md`. Skip when fewer than two PRs exist.
 
 ### 5. Report
 
@@ -117,7 +117,7 @@ The section order is the template's, fixed so reviewers read every PR of a run t
 
 - **For developers, concisely.** No coding details: no lists of files, classes touched or renamed variables; the diff shows that. Name a class or method only when it is an entry point or seam someone must know to follow the flow.
 - **Tickets**: one line per ticket merged into this repo, each reference and title as the tracker adapter's "ticket reference" operation gives it. Do not branch on Jira or local mode.
-- **Manual steps and Ships with**: data the skill fills, never invented. A human ticket without a recorded note shows `(done by human)` alone; one not done is listed as open and as a merge blocker.
+- **Manual steps and Ships with**: data the skill fills, never invented. A human ticket without a recorded note shows `(done by human)` alone; one not done is listed as open, and is also a merge blocker only when this repo's tickets are blocked by it (`blocked_by`); a related-only one is listed as open but is not a blocker.
 - **Design decisions**: where a responsibility was placed, sync vs async, new vs reused abstraction, contract or schema shape, backward compatibility, flag vs hard switch, failure isolation. Skip a decision with no real alternative; omit the subsection for a trivial change.
 - **Architecture (always included)**: a plain ASCII diagram in a `text` fence of the components this change touches, how they connect (calls, events, data reads) and the key methods or messages on the links. At most about 15 lines and 80 columns. Mark what this PR changes with `*` and keep the legend line. Show sibling repos where they sit on the other side of a link. For a flow, put its direction on the links rather than drawing a second diagram. For a small change, draw just the changed component and its neighbors. Every box and link must come from the diff or the repo; an inferred link goes under Unverified / gaps.
 - **Attention points**: the alert holds merge blockers only: a downstream repo pinned to an upstream snapshot (`kinetic.gitops pin`) that must move to a released version, an upstream PR that must merge first, a human ticket this repo's tickets are blocked by that is not done (from Manual steps), and "Merge together with: ..." (from Ships with). Risk: a two-way door can be walked back, a one-way door (destructive or hard to reverse) cannot; the blast radius is the scope of impact, such as consumer breakage or a pinned downstream repo. Evidence comes from the run's `verify` records and logs: the command, exit code and test counts as recorded, and the failing-then-passing test where the tickets show one. Never invent counts. Other bullets only when they change how someone reviews, merges or deploys: migrations and rollback, deploy ordering, incompatible contract changes, new config or flags and their defaults, behavior differences between environments.
