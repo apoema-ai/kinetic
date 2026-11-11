@@ -59,6 +59,16 @@ class FrontierTest(unittest.TestCase):
         s = S({"A": t("r1", "running"), "B": t("r1"), "C": t("r2")})
         self.assertEqual(frontier.ready(s), ["C"])
 
+    def test_needs_decision_and_blocked_occupy_repo(self):
+        for st in ("needs_decision", "blocked"):
+            s = S({"A": t("r1", st), "B": t("r1"), "C": t("r2")})
+            self.assertEqual(frontier.ready(s), ["C"], st)
+
+    def test_needs_decision_not_counted_in_cap(self):
+        s = S({"N": t("r0", "needs_decision"), "R1": t("r1", "running"),
+               "R2": t("r2", "running"), "A": t("r3"), "B": t("r4")})
+        self.assertEqual(frontier.ready(s), ["A"])
+
     def test_cap_counts_running(self):
         s = S({"R1": t("r1", "running"), "R2": t("r2", "running"),
                "A": t("r3"), "B": t("r4")})
@@ -79,9 +89,9 @@ class FrontierTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             state.init(d, "epic", "X-1")
             def add(s):
-                s["tickets"] = {"A": t("r1"), "B": t("r1")}
+                s["tickets"] = {"A": t("r1"), "B": t("r2")}
             state._mutate(d, add)
-            r = subprocess.run([sys.executable, "-m", "kinetic.frontier", "--run", d],
+            r = subprocess.run([sys.executable, "-m", "kinetic.frontier", "--run", d, "--cap", "1"],
                                capture_output=True, text=True, cwd=str(ROOT),
                                env={"PYTHONPATH": str(ROOT / "scripts"), "PATH": "/usr/bin:/bin"})
             self.assertEqual(r.returncode, 0, r.stderr)
