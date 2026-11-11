@@ -10,22 +10,22 @@ A rejected gate: record `--approved false` with the reason as `--note`, `set-pha
 
 ## Spec gate (after the spec phase)
 
-Show the spec location (Jira key or `<run_dir>/spec.md`) and a three-line summary. The spec must already pass `python3 -m kinetic.spec_lint <file>` (exit 0). Ask: "Approve this spec?" Options: approve, revise.
+Show the spec location (the tracker reference or `<run_dir>/spec.md`) and a three-line summary. The spec must already pass `python3 -m kinetic.spec_lint <file>` (exit 0). Ask: "Approve this spec?" Options: approve, revise.
 
 ## Breakdown gate (after tickets; records the grant)
 
-Before asking, `python3 -m kinetic.graph validate --run <run_dir>` must print empty `errors`. Show the ticket list: id, repo, blocked-by with edge types, and interfaces (produces / consumes). Show every `warnings` entry under the list (an interface no ticket produces) so the user can confirm it already exists.
+Before asking, `python3 -m kinetic.graph validate --run <run_dir>` must print empty `errors`. Show the ticket list, human tickets first with their one-line reason: id, type, repo (human tickets may have none), blocked-by with edge types, after / ships-with / related where set, and interfaces (produces / consumes, agent tickets only). Show every `warnings` entry under the list (an interface no ticket produces) so the user can confirm it already exists.
 
 The question must spell out the grant in substance:
 
-> Approving this breakdown grants the build agents, for the tickets and repos listed, to: commit and push to the ticket branch, make Jira transitions, and open draft PRs. It never grants: pushes to master or Release branches, force-push after review, deploys without the deploy hook's confirmation, or prod data writes.
+> Approving this breakdown grants the build agents, for the tickets and repos listed, to: commit and push to the ticket branch, move ticket status in the tracker, and open draft PRs. It never grants: pushes to master or Release branches, force-push after review, deploys without the deploy hook's confirmation, or prod data writes.
 
-Options: approve (record the grant), revise tickets. In the quick lane this is the same question with the single ticket; also ask which seams its tests may use, and put the answer in the ticket file. The run's Grant line given to each implementer is the approved wording shortened to: `Grant: commit and push to ticket branch; Jira transitions; draft PRs; never master/Release, force-push after review, deploys, prod data writes`. Do not extend it.
+Options: approve (record the grant), revise tickets. In the quick lane this is the same question with the single ticket; also ask which seams its tests may use, and put the answer in the ticket file. The run's Grant line given to each implementer is the approved wording shortened to: `Grant: commit and push to ticket branch; tracker status moves; draft PRs; never master/Release, force-push after review, deploys, prod data writes`. Do not extend it.
 
 ## Ship gate (before the ship skill)
 
 Show per repo: integration branch, base branch, merge order (`python3 -m kinetic.gitops merge-order --run <run_dir>`), and the latest verify result per repo from state. Ask: "Push the integration branches and open draft PRs?" Options: approve, hold.
 
-On approve, record the gate then read and follow `skills/ship/SKILL.md`. Push, PR creation and Jira writes are additionally confirmed by hooks; a hook denial is final: report it to the user, do not retry another way. Deploy is a separate hook-confirmed step and is never covered by any gate.
+On approve, record the gate then read and follow `skills/ship/SKILL.md`. Push, PR creation and tracker writes are additionally confirmed by hooks; a hook denial is final: report it to the user, do not retry another way. Deploy is a separate hook-confirmed step and is never covered by any gate.
 
 The run counts as shipped when `gates["ship"]["approved"]` true and phase `ship`; retro follows.

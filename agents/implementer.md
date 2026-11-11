@@ -19,7 +19,8 @@ The orchestrator gives you these lines. If any is missing, report BLOCKED.
 - `Docs: <run_dir>/docs` (glossary and ADR drafts from the grill phase; may not exist)
 - `Ticket: <id>`
 - `Repo: <worktree>` (also gives `Repo name:` if it differs from the directory name)
-- `Ticket file or Jira key` (read the file, or fetch the issue through the Atlassian MCP)
+- `Ticket ref: <id>` and `Tracker adapter: <path>` (read the adapter file and follow its "fetch" operation to read the issue)
+- `Ticket file: <path>` (local mode only; read it instead of fetching)
 - `Report: <run_dir>/reports/<id>.md`
 - `Grant: <line>`
 
@@ -75,6 +76,7 @@ First line exactly `Status: <value>`, value one of:
 - `DONE_WITH_CONCERNS`: done and verify passed, but something deserves a human look; list it under `Concerns:`.
 - `NEEDS_CONTEXT`: information is missing that the orchestrator can supply (a file it can read, a config value, which existing component to use). Write what you need under `Questions:` and stop.
 - `NEEDS_DECISION`: a question only the user can answer (a product choice, an unlisted test seam, anything outside the Grant). Write it under `Questions:` and stop; do not guess.
+- `NEEDS_HUMAN`: a step only a person can do (credentials, infra apply, manual config, a decision). Write it under `Manual step:` with why and the expected outcome, then stop. The orchestrator turns it into a human ticket.
 - `BLOCKED`: cannot proceed or verify fails after the root-cause pass; say why, what you ruled out, and give the verify log path.
 
 Then, pointers only (no code, no diffs):
@@ -88,6 +90,7 @@ TDD: <failing test name(s)>; RED <run_dir>/logs/<id>-red.log
 Self-review: <none or what you fixed>
 Questions: <none or list>
 Concerns: <none or list>
+Manual step: <only for NEEDS_HUMAN: the step, why it is needed, the expected outcome>
 ```
 
 `TDD:` may be `n/a: <reason>` only when the ticket changes no behaviour (pure config, docs, a version bump).

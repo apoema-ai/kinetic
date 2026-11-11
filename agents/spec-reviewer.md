@@ -15,7 +15,7 @@ You judge one question: does this diff deliver the ticket's acceptance criteria 
 - `Ticket: <id>`
 - `Repo: <worktree>`
 - `Diff: <integration>...<ticket-branch>`
-- `Ticket file or Jira key` (read the file, or fetch the issue through the Atlassian MCP)
+- `Ticket ref: <id>` and `Tracker adapter: <path>` (read the adapter file and follow its "fetch" operation to read the issue), plus `Ticket file: <path>` in local mode (read the file instead)
 - Output file: `<run_dir>/reviews/<id>-spec.md`
 
 ## Read-only

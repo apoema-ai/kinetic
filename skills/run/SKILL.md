@@ -3,7 +3,7 @@ name: run
 description: Drive a kinetic run end to end. Picks the lane, enforces the approval gates, runs the build loop and sequences the phase skills (grill, spec, tickets, tdd, ship, retro). The only orchestrator.
 model: sonnet
 disable-model-invocation: true
-argument-hint: "<JIRA-KEY|idea|spec-path> [--from build]"
+argument-hint: "<ticket-ref|idea|spec-path> [--from build]"
 ---
 
 # Kinetic run
@@ -24,9 +24,9 @@ Guides (read each at the point named, under `${CLAUDE_PLUGIN_ROOT}/skills/run/gu
 ## 1. Preflight
 
 1. Read `~/.config/kinetic/repos.json` and run `python3 -m kinetic.doctor --repo NAME=PATH` once per entry with a `path` (all in one call). Show warns with their fix (missing reused skills have fallbacks, see `build-loop.md`). Stop on any fail. If there is no repos.json, tell the user to run `/kinetic:init` and stop.
-2. Read `~/.config/kinetic/settings.json` for `workspace_root` (default `~/workspace/kinetic-runs`) and `tracker`.
+2. Read `~/.config/kinetic/settings.json` for `workspace_root` (default `~/workspace/kinetic-runs`), then resolve the tracker once with `python3 -m kinetic.tracker resolve` and read the adapter file it names; every tracker operation in a run follows that adapter.
 3. If `~/.config/kinetic/active-run` exists and points at a run directory containing `state.json`, read `guides/recovery.md` and follow it instead of initialising. Never pass `--force` to `state init` unless the user explicitly asks to restart.
-4. Otherwise the run dir is `<workspace_root>/<run-id>/`, run-id = the Jira key, or a kebab slug of the idea plus the date (`<slug>-YYYY-MM-DD`). For a spec path, slug its file name.
+4. Otherwise the run dir is `<workspace_root>/<run-id>/`, run-id = the ticket reference, or a kebab slug of the idea plus the date (`<slug>-YYYY-MM-DD`). For a spec path, slug its file name.
 
 ## 2. Start
 
@@ -52,11 +52,12 @@ Set each with `python3 -m kinetic.state set-phase --run <run_dir> --phase <phase
 | ship | Read and follow `skills/ship/SKILL.md`, run the ship gate (`gates.md`) first. Offer `dev-fleet:release` only if the user asks and the repo is k8s-hosted. |
 | retro | Read and follow `skills/retro/SKILL.md`. Then `set-phase done` and `rm -f ~/.config/kinetic/active-run`. |
 
-A rejected gate returns to the previous phase skill, never forward. Push, PR, Jira writes and deploy are additionally confirmed by hooks: never try to work around a hook decision.
+A rejected gate returns to the previous phase skill, never forward. Push, PR, tracker writes and deploy are additionally confirmed by hooks: never try to work around a hook decision.
 
 ## Rules
 
 - At most 3 implementers at once, at most 1 running per repo; `kinetic.frontier` enforces both.
+- Human tickets are never dispatched: each round print `waiting_on_you`, and stop when `only_human_left` (see `build-loop.md`).
 - Never dispatch an agent from inside an agent; you are the only dispatcher.
 - A reused skill that is missing: use the fallback named in the guide, or ask the user. Never fail silently.
 - Record every user decision that changes scope with `python3 -m kinetic.state add-ruling --run <run_dir> --what ... --why ... --cost ...`.

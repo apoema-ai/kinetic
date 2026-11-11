@@ -3,7 +3,7 @@ name: implement
 description: Start the build lane for a ticket that is already well specified. Checks the ref has acceptance criteria and a repo; otherwise points to /kinetic:run.
 model: sonnet
 disable-model-invocation: true
-argument-hint: "<JIRA-KEY|ticket-file|spec-path>"
+argument-hint: "<ticket-ref|ticket-file|spec-path>"
 ---
 
 # Kinetic implement
@@ -12,7 +12,7 @@ Alias for `/kinetic:run <ref> --from build`, with a pre-check. Do not reimplemen
 
 ## Validate the ref
 
-Load it: a Jira key via the Atlassian MCP `getJiraIssue`, otherwise read the ticket or spec file. It needs both:
+Load it: a tracker reference through the adapter's "fetch" operation (resolve the tracker with `python3 -m kinetic.tracker resolve` and read the adapter file it names), otherwise read the ticket or spec file. It needs both:
 
 - **Acceptance criteria**: a `- [ ]` checklist or an "Acceptance criteria" section.
 - **A repo**: a `Repo:` line, a repo field, or exactly one repo registered in `~/.config/kinetic/repos.json`.

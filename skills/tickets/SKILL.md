@@ -10,13 +10,13 @@ Break the spec into **slices** (tracer-bullet vertical slices, each a parent tic
 
 The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`), the spec location and the list of repos in play. Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
 
-Tracker settings come from the run: `tracker: jira|local` in `~/.config/kinetic/` config (set by `/kinetic:init`). When no tracker is configured, use local mode.
+Resolve the tracker with `python3 -m kinetic.tracker resolve` (set by `/kinetic:init`; with no tracker configured it resolves to local), read the adapter file it names, and follow its operations by name ("create slice parent", "create child", "link blocker", "link after", "link ships-with", "link related", "set kind", "assign to user", "fetch", ...). Tracker-specific names come from the resolve output: `names.kind.human`, `names.edge.<type>`, `names.after`, `names.ships_with`, `names.related`. Do not hard-code them.
 
 ## Process
 
 ### 1. Gather context
 
-Read the spec in full (Jira issue or `<run_dir>/spec.md`) and the repos list. Explore the codebase if you haven't. Use `<run_dir>/docs/GLOSSARY.md` (or the repo's own) vocabulary and respect ADRs in the areas touched. Look for prefactoring that makes the change easy first: "make the change easy, then make the easy change."
+Read the spec in full (the tracker issue, fetched through the adapter's "fetch" operation, or `<run_dir>/spec.md`) and the repos list. Explore the codebase if you haven't. Use `<run_dir>/docs/GLOSSARY.md` (or the repo's own) vocabulary and respect ADRs in the areas touched. Look for prefactoring that makes the change easy first: "make the change easy, then make the easy change."
 
 ### 2. Draft slices and child tickets
 
@@ -35,15 +35,23 @@ Give each child ticket its **blocking edges**, each with a type:
 - `merge`: downstream waits for the upstream merge.
 - `release`: downstream waits for a released version.
 
-Use only these three types. A ticket with no blockers can start immediately. Use a `snapshot` edge between two repos only when the upstream repo's config has `publish_snapshot` and the downstream repo's has `pin` (read `~/.config/kinetic/repos.json` and each repo's `.kinetic.json`); without them the pin step cannot run and the downstream ticket never becomes ready, so use `merge`. Use `release` only when the downstream genuinely needs a released version: the orchestrator marks it released by hand, so say so in the ticket. Within one repo prefer `merge`.
+Beyond blockers, a child ticket may carry soft links, each only where it applies:
 
-Give each child ticket its **interfaces**: what it `produces` that another ticket uses (an API endpoint, a client method, an event, a schema, a config key), and what it `consumes` from other tickets or from existing code. Use one stable name per interface across tickets, in the glossary's terms (for example `StatementClient.export` or `event:statement-exported`). A ticket that consumes what another ticket produces must be blocked by it, directly or through other tickets; `graph validate` reports it as an error otherwise.
+- `After`: soft precedence, "do this later if it is cheap" (not a blocker; it only breaks ordering ties).
+- `Ships with`: a group name shared by tickets in different repos whose PRs must merge together.
+- `Related`: tickets worth reading together, with no ordering.
+
+Give each child a **Type**: `agent` (an implementer can do it) or `human` (only a person can: credentials, an infra apply, manual config, a decision, a console click). Propose the type and a one-line reason for every human ticket.
+
+Use only these three edge types. A ticket with no blockers can start immediately. Use a `snapshot` edge between two repos only when the upstream repo's config has `publish_snapshot` and the downstream repo's has `pin` (read `~/.config/kinetic/repos.json` and each repo's `.kinetic.json`); without them the pin step cannot run and the downstream ticket never becomes ready, so use `merge`. Use `release` only when the downstream genuinely needs a released version: the orchestrator marks it released by hand, so say so in the ticket. Within one repo prefer `merge`.
+
+Give each agent ticket its **interfaces** (human tickets have none): what it `produces` that another ticket uses (an API endpoint, a client method, an event, a schema, a config key), and what it `consumes` from other tickets or from existing code. Use one stable name per interface across tickets, in the glossary's terms (for example `StatementClient.export` or `event:statement-exported`). A ticket that consumes what another ticket produces must be blocked by it, directly or through other tickets; `graph validate` reports it as an error otherwise.
 
 **Wide refactors are the exception to vertical slicing.** One mechanical change (rename a column, retype a shared symbol) whose blast radius fans across the codebase cannot land green as a single slice. Sequence it as expand-contract: expand (add the new form beside the old), migrate call sites in batches sized by blast radius (each batch its own ticket blocked by the expand), then contract (delete the old form, blocked by every migrate batch).
 
 ### 3. Quiz the user
 
-Present the breakdown as a numbered list. For each ticket show the title, its slice and repo, **Blocked by** (with edge types), **Interfaces** (produces / consumes), and what it delivers end to end. Ask:
+Present the breakdown as a numbered list. Show a table with a `type` column, human tickets first, with a one-line reason under each human ticket. For each ticket show the title, its type, slice and repo (human tickets may have no repo), **Blocked by** (with edge types), **After** / **Ships with** / **Related** where they apply, **Interfaces** (produces / consumes, agent tickets only), and what it delivers end to end. Ask:
 
 - Does the granularity feel right (too coarse / too fine)?
 - Does each ticket depend only on tickets that genuinely gate it, with the right edge type?
@@ -55,29 +63,34 @@ Iterate until the user approves.
 
 Publish in dependency order (blockers first) so edges can reference real identifiers. Do NOT close or modify the source spec issue.
 
-- **Jira**: create one parent issue per slice, and one child issue per repo under it. Link blockers with the native "blocks" link and add the label `edge:snapshot`, `edge:merge` or `edge:release` matching the edge type. Use the ticket key as the ticket id.
-- **Local**: write one file per child ticket at `<run_dir>/issues/NN-<repo>-<slug>.md`, numbered from `01` in dependency order. Use `NN-<repo>-<slug>` as the ticket id. One ticket per file, never a combined file.
+- **Tracker with remote issues**: follow the adapter: "create slice parent" per slice, "create child" per ticket under it, "set kind" for human tickets, "assign to user" for human tickets, "link blocker" with the edge type for each blocker, and "link after" / "link ships-with" / "link related" where they apply. Use the ticket reference the adapter gives as the ticket id.
+- **Local**: write one file per child ticket at `<run_dir>/issues/NN-<repo>-<slug>.md`, numbered from `01` in dependency order. Use `NN-<repo>-<slug>` as the ticket id (a human ticket with no repo: `NN-<slug>`). One ticket per file, never a combined file. The first lines of the file are a header that `kinetic.board` owns (see step 5): write the template, then let `board header` fill it.
 
 Local ticket template:
 
 ```md
 # <NN>: <Ticket title>
 
+<owned header lines: Type, Status, Assignee, written by `board header`>
 **Slice:** <slice id>
-**Repo:** <repo>
+**Repo:** <repo> (omit for a human ticket)
+**Type:** agent | human
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer list.
 **Blocked by:** `<ticket id>` (snapshot|merge|release), ... or "None (can start immediately)".
-**Interfaces:** produces `<name>`, ...; consumes `<name>`, ... (or "none").
+**After:** `<ticket id>`, ... (omit when none)
+**Ships with:** `<group>` (omit when none)
+**Related:** `<ticket id>`, ... (omit when none)
+**Interfaces:** produces `<name>`, ...; consumes `<name>`, ... (or "none"). Omit for a human ticket.
 
 - [ ] Acceptance criterion 1
 - [ ] Acceptance criterion 2
 ```
 
-Jira issue bodies use the same content (Parent, What to build, Interfaces, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
+A human ticket's body is a checklist of the manual steps (`- [ ] step`) and the expected outcome of each, with no Interfaces section. Remote issue bodies use the same content (Parent, What to build, Interfaces, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
 
 ### 5. Record in state
 
-Ids: a ticket id is the Jira key in jira mode and `NN-<repo>-<slug>` in local mode; a slice id follows the same rule for its parent ticket (Jira key, or `NN-<slug>` for a local parent).
+Ids: a ticket id is the adapter's ticket reference for a remote tracker and `NN-<repo>-<slug>` in local mode; a slice id follows the same rule for its parent ticket (the reference, or `NN-<slug>` for a local parent).
 
 First record the approved slice ids, before any child ticket, so `graph validate`'s slice check is live:
 
@@ -91,7 +104,9 @@ Then, for every child ticket (`blocked_by` is a JSON list of `{"id","type"}`; us
 python3 -m kinetic.state set-ticket --run <dir> --id <ticket-id> --field repo=<repo> --field slice=<slice-id> --field 'blocked_by=[{"id":"<blocker-id>","type":"snapshot"}]' --field 'produces=["<name>"]' --field 'consumes=["<name>"]'
 ```
 
-Omit `produces` or `consumes` when the ticket has none.
+Omit `produces` or `consumes` when the ticket has none. Add the new fields where they apply: `--field kind=human` (human ticket; leave out `repo` when it has none), `--field 'after=["<id>"]'`, `--field ships_with=<group>`, `--field 'related=["<id>"]'`.
+
+In local mode, after writing each ticket file run `python3 -m kinetic.board header --run <dir> --id <ticket-id>` so its header matches state, and when all files are written `python3 -m kinetic.board render --run <dir>`. Do this before anything reads `board drift`: a hand-written file shows drift until its first `header`.
 
 Every slice id passed to `set-slices` must appear in at least one ticket's `slice` field. Do not edit `state.json` by hand.
 

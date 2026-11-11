@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Turn the grilled conversation into a spec with threat model, non-functional requirements and acceptance criteria, lint it, and publish it to Jira or the run directory. Use at the spec phase of a kinetic run.
+description: Turn the grilled conversation into a spec with threat model, non-functional requirements and acceptance criteria, lint it, and publish it to the tracker or the run directory. Use at the spec phase of a kinetic run.
 model: sonnet
 ---
 
@@ -10,7 +10,7 @@ Take the current conversation context and codebase understanding and produce a s
 
 The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`). Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
 
-Tracker settings come from the run: `tracker: jira|local` in `~/.config/kinetic/` config (set by `/kinetic:init`), plus the Jira project when `jira`. When no tracker is configured, use local mode.
+Resolve the tracker with `python3 -m kinetic.tracker resolve` (set by `/kinetic:init`; with no tracker configured it resolves to local), read the adapter file it names, and follow its operations.
 
 ## Process
 
@@ -29,7 +29,7 @@ python3 -m kinetic.spec_lint <run_dir>/spec.md
 (same `PYTHONPATH` prefix). It prints a JSON list of problems. Fix the spec and re-run until the list is empty (`[]`).
 
 5. Publish:
-   - **Jira**: create one issue in the project from config containing the spec body, and note its key at the top of `<run_dir>/spec.md`.
+   - **Tracker with remote issues**: follow the adapter's "create slice parent" operation with the spec body, and note the ticket reference at the top of `<run_dir>/spec.md`.
    - **Local**: `<run_dir>/spec.md` is the published spec.
 
 The orchestrator then runs the spec approval gate; do not set phases or gates here.
