@@ -36,7 +36,9 @@ class SkillTextTest(unittest.TestCase):
         for needle in ("only_human_left", "waiting_on_you", "human-done",
                        "NEEDS_HUMAN", "board drift", "-human-N"):
             self.assertIn(needle, text)
-        self.assertLess(text.index("only_human_left"), text.index("stalled"))
+        human = text.index("- `only_human_left` is true")
+        stalled = text.index("the loop is stalled on edges")
+        self.assertLess(human, stalled)
 
     def test_all_frontmatter_parses(self):
         try:

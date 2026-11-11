@@ -71,22 +71,14 @@ Local ticket template:
 ```md
 # <NN>: <Ticket title>
 
-<owned header lines: Type, Status, Assignee, written by `board header`>
-**Slice:** <slice id>
-**Repo:** <repo> (omit for a human ticket)
-**Type:** agent | human
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer list.
-**Blocked by:** `<ticket id>` (snapshot|merge|release), ... or "None (can start immediately)".
-**After:** `<ticket id>`, ... (omit when none)
-**Ships with:** `<group>` (omit when none)
-**Related:** `<ticket id>`, ... (omit when none)
 **Interfaces:** produces `<name>`, ...; consumes `<name>`, ... (or "none"). Omit for a human ticket.
 
 - [ ] Acceptance criterion 1
 - [ ] Acceptance criterion 2
 ```
 
-A human ticket's body is a checklist of the manual steps (`- [ ] step`) and the expected outcome of each, with no Interfaces section. Remote issue bodies use the same content (Parent, What to build, Interfaces, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
+The template carries no Status, Type, Repo, Slice, Blocked by, After, Ships with, Related or Assignee lines: `board header` inserts those owned lines from state, whose values you pass with `set-ticket` (step 5). Do not hand-write them. A human ticket's body is a checklist of the manual steps (`- [ ] step`) and the expected outcome of each, with no Interfaces section. Remote issue bodies use the same content (Parent, What to build, Interfaces, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
 
 ### 5. Record in state
 

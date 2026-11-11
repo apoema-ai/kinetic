@@ -52,7 +52,7 @@ Set each with `python3 -m kinetic.state set-phase --run <run_dir> --phase <phase
 | ship | Read and follow `skills/ship/SKILL.md`, run the ship gate (`gates.md`) first. Offer `dev-fleet:release` only if the user asks and the repo is k8s-hosted. |
 | retro | Read and follow `skills/retro/SKILL.md`. Then `set-phase done` and `rm -f ~/.config/kinetic/active-run`. |
 
-A rejected gate returns to the previous phase skill, never forward. Push, PR, tracker writes and deploy are additionally confirmed by hooks: never try to work around a hook decision.
+A rejected gate returns to the previous phase skill, never forward. Push, PR, deploy, Atlassian MCP writes and Bash commands such as `gh` are additionally confirmed by hooks; other MCP tracker writes (for example Linear) are covered only by the grant. Never try to work around a hook decision.
 
 ## Rules
 
