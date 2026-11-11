@@ -12,7 +12,7 @@ Set up kinetic. Ask one question at a time, multiple choice where possible. Writ
 
 Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
 
-Run this with no active run: while `~/.config/kinetic/active-run` exists the isolation hook denies the config writes below. Finish or abandon the run first.
+Run this outside the session that owns the active run: in that session the isolation hook denies the config writes below. Any other session works, or finish or abandon the run first.
 
 ## Steps
 

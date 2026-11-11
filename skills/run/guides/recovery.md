@@ -16,4 +16,4 @@ Never assume an agent from a previous session is alive. Re-derive everything fro
 
 ## Continue
 
-Resume at the recorded phase: re-read the guide for that phase and continue from the first unfinished step. Gates already recorded approved stay approved; a gate not recorded is asked again. If the phase is `build`, start a round with `kinetic.frontier`. If the user wants to abandon the run, `rm -f ~/.config/kinetic/active-run` only on their say-so.
+Before resuming in a new session, rewrite the pointer with the same `printf '%s' <run_dir> | tee ~/.config/kinetic/active-run` command from `run/SKILL.md`: that claims the run for this session, so the hooks act here and stop acting in the old one. Resume at the recorded phase: re-read the guide for that phase and continue from the first unfinished step. Gates already recorded approved stay approved; a gate not recorded is asked again. If the phase is `build`, start a round with `kinetic.frontier`. If the user wants to abandon the run, `rm -f ~/.config/kinetic/active-run` only on their say-so.

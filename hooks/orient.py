@@ -10,7 +10,7 @@ def _one(s) -> str:
 
 
 def main(inp):
-    found = _common.active_run()
+    found = _common.active_run()  # orient every session, so a new one can resume
     if not found:
         return
     from kinetic import next_step

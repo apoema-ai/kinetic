@@ -18,7 +18,7 @@ def _stale(stamp, v):
 
 
 def main(inp):
-    found = _common.active_run()
+    found = _common.active_run(inp)
     if inp.get("stop_hook_active") or not found:
         return
     run_dir, st = found

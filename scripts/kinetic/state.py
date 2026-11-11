@@ -109,6 +109,11 @@ def set_ticket(run_dir, ticket_id: str, **fields) -> dict:
     return _mutate(run_dir, fn)
 
 
+def set_owner(run_dir, session_id: str) -> dict:
+    """Record the Claude session that owns the run; hooks in other sessions ignore it."""
+    return _mutate(run_dir, lambda s: s.update(owner_session=session_id))
+
+
 def set_repo(run_dir, name: str, path: str, integration_branch: str) -> dict:
     def fn(state):
         state["repos"].setdefault(name, {}).update(

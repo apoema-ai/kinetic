@@ -4,7 +4,7 @@ import _common
 
 
 def main(inp):
-    found = _common.active_run()
+    found = _common.active_run(inp)
     ti = inp.get("tool_input") or {}
     path = ti.get("file_path") or ti.get("notebook_path")
     if found and path:

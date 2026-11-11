@@ -55,6 +55,55 @@ class HookCase(unittest.TestCase):
         state._mutate(self.run_dir, fn)
 
 
+class SessionScope(HookCase):
+    def write(self, path, **extra):
+        return self.decision(self.hook("isolation", dict(
+            {"tool_name": "Write", "tool_input": {"file_path": path}}, **extra)))
+
+    def claim(self, sid, cmd="printf '%s' /r | tee ~/.config/kinetic/active-run"):
+        self.hook("claim_run", {"tool_name": "Bash", "tool_input": {"command": cmd}, "session_id": sid})
+
+    def test_pointer_write_claims_run_for_that_session(self):
+        self.activate()
+        self.claim("s1")
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
+        self.claim("s2")  # a resume in a new session re-claims
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s2")
+
+    def test_unrelated_bash_does_not_claim(self):
+        self.activate()
+        self.claim("s1", cmd="ls ~/.config/kinetic")
+        self.assertNotIn("owner_session", state.load(self.run_dir))
+
+    def test_owner_session_is_isolated_other_session_is_not(self):
+        self.activate()
+        self.claim("s1")
+        outside = str(self.home / "elsewhere.txt")
+        self.assertEqual(self.write(outside, session_id="s1"), "deny")
+        self.assertIsNone(self.write(outside, session_id="s2", cwd=str(self.home)))
+
+    def test_cwd_inside_run_dir_is_in_scope_for_any_session(self):
+        self.activate()
+        self.claim("s1")
+        wt = self.run_dir / "worktrees" / "api-1"
+        wt.mkdir(parents=True)
+        self.assertEqual(self.write(str(self.home / "x.txt"), session_id="sub", cwd=str(wt)), "deny")
+
+    def test_unclaimed_run_or_missing_session_id_stays_global(self):
+        self.activate()
+        outside = str(self.home / "x.txt")
+        self.assertEqual(self.write(outside, session_id="s2"), "deny")
+        self.claim("s1")
+        self.assertEqual(self.write(outside), "deny")
+
+    def test_other_session_stop_not_gated(self):
+        self.activate()
+        self.claim("s1")
+        self.stamp(repo_edit=T3)
+        self.assertIsNone(self.hook("completion_gate", {"session_id": "s2", "cwd": str(self.home)}))
+        self.assertEqual(self.hook("completion_gate", {"session_id": "s1"})["decision"], "block")
+
+
 class StopGate(HookCase):
     def test_stop_blocks_when_edit_after_verify(self):
         self.activate()

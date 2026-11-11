@@ -46,12 +46,12 @@ Dependency edges are exactly `snapshot`, `merge` and `release` (Jira labels `edg
 - **Isolation (PreToolUse)**: file writes outside registered repos and the run dir are denied.
 - **Write-ops**: `git push` to `main`, `master` or `Release*` is denied; other pushes, `gh pr` writes, and Jira or GitHub write calls ask first.
 - **Deploy**: deploy and tekton-trigger MCP calls ask first.
-- **PostToolUse**: records edits so the Stop gate can compare them with verifies.
+- **PostToolUse**: records edits so the Stop gate can compare them with verifies, and claims the run for the session whose Bash command wrote the active-run pointer.
 - **SessionStart**: orients the session to the active run.
 
 ## Known limitations
 
-- The active-run pointer is machine-global, so the hooks act on every Claude session while a run is active.
+- The hooks act only in the session that wrote the active-run pointer, plus any call whose cwd is inside the run dir. Until a session claims the run, or when a hook payload has no session id, they act on every session. Whether subagent hook payloads carry the parent session id is unverified; the cwd rule covers implementers either way.
 - A bare `git push` on a protected branch only asks; it is not denied.
 - `gh api` calls (including merges) pass through the write-ops hook, and base branches other than `main`, `master` and `Release*` are not protected.
 - Isolation cannot tell implementers apart within the run dir.
