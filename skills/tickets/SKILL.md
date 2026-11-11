@@ -16,7 +16,7 @@ Tracker settings come from the run: `tracker: jira|local` in `~/.config/kinetic/
 
 ### 1. Gather context
 
-Read the spec in full (Jira issue or `<run_dir>/spec.md`) and the repos list. Explore the codebase if you haven't. Use `GLOSSARY.md` vocabulary and respect ADRs in the areas touched. Look for prefactoring that makes the change easy first: "make the change easy, then make the easy change."
+Read the spec in full (Jira issue or `<run_dir>/spec.md`) and the repos list. Explore the codebase if you haven't. Use `<run_dir>/docs/GLOSSARY.md` (or the repo's own) vocabulary and respect ADRs in the areas touched. Look for prefactoring that makes the change easy first: "make the change easy, then make the easy change."
 
 ### 2. Draft slices and child tickets
 

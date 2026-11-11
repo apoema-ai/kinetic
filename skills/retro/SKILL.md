@@ -33,7 +33,7 @@ Anything you propose to put in `CLAUDE.md`, `AGENTS.md`, a skill or a standards 
 4. Draft the run's operational docs under `<run_dir>/docs/` (create the directory):
 
 - `<run_dir>/docs/runbook.md`: for operators of what shipped. Sections: what changed and where (repos, PRs), how to verify it is healthy, configuration and feature flags, rollout and rollback order (use `python3 -m kinetic.gitops merge-order --run <dir>`), known failure modes and what to do, who to ask.
-- `<run_dir>/docs/release-notes.md`: for consumers. Group by slice; describe user-visible behavior in `GLOSSARY.md` language; call out breaking changes, migrations and required pins or version bumps.
+- `<run_dir>/docs/release-notes.md`: for consumers. Group by slice; describe user-visible behavior in `<run_dir>/docs/GLOSSARY.md` language; call out breaking changes, migrations and required pins or version bumps.
 
 Source facts from the spec, ticket reports and PRs, not from memory. Mark anything you could not verify as "unverified" instead of stating it as fact. These are drafts for the user to review.
 

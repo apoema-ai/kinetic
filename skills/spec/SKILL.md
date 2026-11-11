@@ -14,7 +14,7 @@ Tracker settings come from the run: `tracker: jira|local` in `~/.config/kinetic/
 
 ## Process
 
-1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's `GLOSSARY.md` vocabulary throughout the spec, and respect any ADRs in the area you're touching.
+1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the vocabulary in `<run_dir>/docs/GLOSSARY.md` (or the repo's own) throughout the spec, and respect any ADRs in the area you're touching.
 
 2. Sketch the seams at which you'll test the feature. Prefer existing seams to new ones, and the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better; the ideal number is one. Check with the user that these seams match their expectations.
 

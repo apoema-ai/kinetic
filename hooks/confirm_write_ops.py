@@ -54,6 +54,8 @@ def _git_calls(cmd: str):
 
 
 def classify_bash(cmd: str):
+    # backslash-newline is a line continuation, not a separator; join it before stripping backslashes
+    cmd = re.sub(r"\\\r?\n", " ", cmd)
     # the shell concatenates quoted pieces (gi''t -> git), so drop quote chars before matching
     cmd = re.sub(r"['\"\\]", "", cmd)
     ask = bool(GH_PR.search(cmd) or ANY_PUSH.search(cmd))

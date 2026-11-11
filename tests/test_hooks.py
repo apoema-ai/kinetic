@@ -230,6 +230,11 @@ class Confirm(HookCase):
         self.assertEqual(self.bash("git push origin feature\ngit checkout main"), "ask")
         self.assertEqual(self.bash("git push origin main\ngit status"), "deny")
 
+    def test_line_continuation_push_denied(self):  # N1
+        self.assertEqual(self.bash("git push origin \\\nmain"), "deny")
+        self.assertEqual(self.bash("git push origin \\\r\nmain"), "deny")
+        self.assertEqual(self.bash("git push \\\n  origin feature"), "ask")
+
     def test_readonly_git_on_protected_names_not_denied(self):
         for cmd in ("git merge-base main HEAD", "git ls-remote origin main", "git cat-file -p main",
                     "git show-ref main", "git for-each-ref refs/heads/main", "git rm -r main",
