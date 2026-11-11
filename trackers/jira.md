@@ -14,13 +14,13 @@ Create an issue of `child_issue_type` in `jira_project` with the parent set to t
 Create a native "Blocks" issue link from the blocker to the blocked ticket. Add the edge label (`names.edge.<snapshot|merge|release>`) to the blocked ticket, since the native link carries no edge type.
 
 ### link after
-Soft precedence has no native link. Add the label `after:<key>` to the ticket that comes later.
+Soft precedence has no native link. Add the label `<names.after>:<key>` to the ticket that comes later.
 
 ### link ships-with
-Add the label `ships-with:<group>` to every ticket in the group.
+Add the label `names.ships_with` with `<group>` substituted to every ticket in the group.
 
 ### link related
-Create a native "Relates to" issue link between the two tickets.
+Create a native issue link of the type named by `names.related` between the two tickets.
 
 ### set kind
 Set the label `names.kind.agent` or `names.kind.human`; remove the other one.

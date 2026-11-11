@@ -14,13 +14,13 @@ Create an issue in the same team with the parent set to the slice parent (sub-is
 Create a "blocks" relation from the blocker to the blocked issue, if the MCP offers it. Also add the edge label (`names.edge.<snapshot|merge|release>`) to the blocked issue. See Fallbacks.
 
 ### link after
-Soft precedence has no native relation. Add the label `after` followed by the identifier (for example `after:ENG-12`) to the later issue.
+Soft precedence has no native relation. Add the label `<names.after>:<identifier>` (identifier of the earlier issue) to the later issue.
 
 ### link ships-with
-Add the label `ships-with:<group>` to every issue in the group.
+Add the label `names.ships_with` with `<group>` substituted to every issue in the group.
 
 ### link related
-Create a "related" relation between the two issues, if the MCP offers it. See Fallbacks.
+Create a relation of the type named by `names.related` between the two issues, if the MCP offers it. See Fallbacks.
 
 ### set kind
 Set the label `names.kind.agent` or `names.kind.human`; remove the other one.
@@ -42,7 +42,7 @@ The issue identifier (for example `ENG-12`) in PR bodies, linked with its URL wh
 
 ## Fallbacks
 
-Where a native relation (blocks, related, sub-issue) is missing in the installed Linear MCP, use a label or a line in the description instead: `Blocked by: ENG-n`, `Related: ENG-n`, plus the edge label. Say so in the run log, naming the relation and the fallback used.
+Where a native relation (blocks, related, sub-issue) is missing in the installed Linear MCP, use a label or a line in the description instead: `Blocked by: <ID>`, `Related: <ID>`, plus the edge label; for a sub-issue, a `Parent: <ID>` line in the child's description. Say so in the run log, naming the relation and the fallback used.
 
 ## Default names
 

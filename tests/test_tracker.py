@@ -60,6 +60,22 @@ class TrackerTest(unittest.TestCase):
         r = resolve(settings=self._settings({"tracker": "other", "tracker_description": "use Notion"}))
         self.assertEqual(r["description"], "use Notion")
 
+    def test_description_only_for_other(self):
+        s = self._settings({"tracker": "local", "tracker_description": "ignored"})
+        self.assertIsNone(resolve(settings=s)["description"])
+
+    def test_non_dict_tracker_settings_raises(self):
+        with self.assertRaises(TrackerError):
+            resolve(settings=self._settings({"tracker": "local", "tracker_settings": "x"}))
+
+    def test_non_dict_tracker_names_raises(self):
+        with self.assertRaises(TrackerError):
+            resolve(settings=self._settings({"tracker": "local", "tracker_names": ["x"]}))
+
+    def test_names_overriding_group_with_string_raises(self):
+        with self.assertRaises(TrackerError):
+            resolve(settings=self._settings({"tracker": "local", "tracker_names": {"kind": "needs-ops"}}))
+
     def test_every_adapter_has_all_roles(self):
         for name in TRACKERS:
             path = ROOT / "trackers" / f"{name}.md"

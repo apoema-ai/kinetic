@@ -2,6 +2,8 @@
 
 Access: the `gh` CLI. Required setting: `github_repo` (`org/repo`), the one repo that holds every issue of the run, because a run spans several repos. Pass it as `--repo <github_repo>` on every call.
 
+Label rule: before any `--label` or `--add-label`, make sure the label exists: check `gh label list --repo <github_repo>` and create a missing one with `gh label create --repo <github_repo>`.
+
 ## Operations
 
 ### create slice parent
@@ -14,19 +16,19 @@ Access: the `gh` CLI. Required setting: `github_repo` (`org/repo`), the one repo
 Use the native "blocked by" relationship if the installed `gh` supports it. Also add the edge label (`names.edge.<snapshot|merge|release>`) to the blocked issue with `gh issue edit --add-label`. See Fallbacks.
 
 ### link after
-Add a line `After: #n` to the body of the later issue (`gh issue edit --body`), keeping the rest of the body.
+Add a line `names.after` with `#n` substituted for the earlier issue's number to the body of the later issue (`gh issue edit --body`), keeping the rest of the body.
 
 ### link ships-with
-Add the label `ships-with:<group>` to every issue in the group. Create a missing label first with `gh label create` (check with `gh label list`).
+Add the label `names.ships_with` with `<group>` substituted to every issue in the group.
 
 ### link related
-Add a line `Related: #n` to the body of the issue.
+Add a line `names.related` with `#n` substituted for the related issue's number to the body of the issue.
 
 ### set kind
 Set the label `names.kind.agent` or `names.kind.human` with `gh issue edit --add-label` / `--remove-label`.
 
 ### move status
-Open the issue for `todo`, `running`, `blocked`: set a status label named by `names.status.<role>` (GitHub issues are only open or closed). Close it with `gh issue edit`/`gh issue close` for `done` and `merged`.
+GitHub issues are only open or closed, so status is a label. Remove any other `names.status.*` label from the issue, then add the one named by `names.status.<role>`. For `todo`, `running` and `blocked`, also run `gh issue reopen` if the issue is closed. For `done` and `merged`, close it with `gh issue close`.
 
 ### assign to user
 `gh issue edit <n> --repo <github_repo> --add-assignee @me`. Use it for human tickets.
@@ -42,7 +44,7 @@ Open the issue for `todo`, `running`, `blocked`: set a status label named by `na
 
 ## Fallbacks
 
-Where a native relationship (sub-issue, "blocked by") is missing in the installed `gh`, use the label or a body line instead: `Blocked by: #n` in the body, plus the edge label. Say so in the run log, naming the relationship and the fallback used. Do not invent `gh` subcommands.
+Where a native relationship (sub-issue, "blocked by") is missing in the installed `gh`, use the label or a body line instead: `Blocked by: #n` in the body, plus the edge label; for a sub-issue, a `Parent: #n` line in the child's body. Say so in the run log, naming the relationship and the fallback used. Do not invent `gh` subcommands.
 
 ## Default names
 

@@ -49,12 +49,16 @@ def adapter_defaults(path: Path) -> dict:
         d = json.loads(m.group(1))
     except ValueError as e:
         raise TrackerError(f"invalid json block in adapter {path}: {e}")
+    _check_roles(d, f"adapter {path}")
+    return d
+
+
+def _check_roles(d: dict, where: str) -> None:
     for role in ROLES:
         try:
             _get(d, role)
         except KeyError:
-            raise TrackerError(f"adapter {path} lacks role '{role}'")
-    return d
+            raise TrackerError(f"{where} lacks role '{role}'")
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -76,6 +80,9 @@ def resolve(settings: Path = DEFAULT_SETTINGS, plugin_root: Path = ROOT) -> dict
     tracker = cfg.get("tracker") or "local"
     if tracker not in TRACKERS:
         raise TrackerError(f"unknown tracker '{tracker}': expected one of {', '.join(TRACKERS)}")
+    for key in ("tracker_settings", "tracker_names"):
+        if not isinstance(cfg.get(key) or {}, dict):
+            raise TrackerError(f"{key} in {settings} must be a JSON object")
     ts = {k: cfg[k] for k in _LEGACY if cfg.get(k)}
     ts.update(cfg.get("tracker_settings") or {})
     missing = [k for k in REQUIRED[tracker] if not ts.get(k)]
@@ -86,12 +93,13 @@ def resolve(settings: Path = DEFAULT_SETTINGS, plugin_root: Path = ROOT) -> dict
         raise TrackerError("tracker 'other' needs tracker_description in settings")
     adapter = Path(plugin_root) / "trackers" / f"{tracker}.md"
     names = _merge(adapter_defaults(adapter), cfg.get("tracker_names") or {})
+    _check_roles(names, f"tracker_names merged over {adapter}")
     return {
         "tracker": tracker,
         "adapter": str(adapter),
         "settings": ts,
         "names": names,
-        "description": description if tracker in ("local", "other") else None,
+        "description": description if tracker == "other" else None,
     }
 
 
