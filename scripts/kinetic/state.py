@@ -31,18 +31,30 @@ def load(run_dir) -> dict:
     return json.loads(_file(run_dir).read_text())
 
 
-def save(run_dir, state: dict) -> None:
-    f = _file(run_dir)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(f.parent), prefix="state.json.")
+def atomic_write(path, text: str) -> None:
+    """Replace path with text via a same-dir temp file, keeping the file's mode (umask default if new)."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write(json.dumps(state, indent=2, sort_keys=True))
-        os.replace(tmp, f)
+        mode = p.stat().st_mode & 0o7777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.chmod(tmp, mode)  # mkstemp creates 0600
+        os.replace(tmp, p)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+def save(run_dir, state: dict) -> None:
+    atomic_write(_file(run_dir), json.dumps(state, indent=2, sort_keys=True))
 
 
 def _mutate(run_dir, fn) -> dict:

@@ -23,6 +23,21 @@ class StateTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.run_dir = Path(self._tmp.name) / "run"
 
+    def test_save_keeps_file_mode(self):
+        state.init(self.run_dir, "feature", "ABC-1")
+        f = self.run_dir / "state.json"
+        f.chmod(0o640)
+        state.set_phase(self.run_dir, "grill")
+        self.assertEqual(f.stat().st_mode & 0o777, 0o640)
+
+    def test_init_uses_umask(self):
+        old = os.umask(0o022)
+        try:
+            state.init(self.run_dir, "feature", "ABC-1")
+        finally:
+            os.umask(old)
+        self.assertEqual((self.run_dir / "state.json").stat().st_mode & 0o777, 0o644)
+
     def test_init_writes_schema(self):
         s = state.init(self.run_dir, "feature", "ABC-1")
         for key in ("run_id", "lane", "ref", "phase", "tickets", "gates",

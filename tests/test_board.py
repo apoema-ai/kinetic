@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -151,6 +152,23 @@ class BoardTest(unittest.TestCase):
         board.write_header(run, "01-lib-x-a")
         board.write_header(run, "01-lib-x-a")
         self.assertEqual([p.name for p in (run / "issues").iterdir()], ["01-lib-x-a.md"])
+
+    def test_write_header_keeps_file_mode(self):
+        run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x"}})
+        f = run / "issues" / "01-lib-x-a.md"
+        f.write_text("# a\n\nbody\n")
+        f.chmod(0o640)
+        board.write_header(run, "01-lib-x-a")
+        self.assertEqual(f.stat().st_mode & 0o777, 0o640)
+
+    def test_write_header_new_file_uses_umask(self):
+        run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x"}})
+        old = os.umask(0o022)
+        try:
+            board.write_header(run, "01-lib-x-a")
+        finally:
+            os.umask(old)
+        self.assertEqual((run / "issues" / "01-lib-x-a.md").stat().st_mode & 0o777, 0o644)
 
     def test_cli(self):
         run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x"}})

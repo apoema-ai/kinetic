@@ -187,7 +187,7 @@ Three gates, each asked with a multiple-choice question and recorded in state (`
 | `breakdown` | After tickets | Every ticket with its repo and blockers by edge type. Approving records the **grant**. |
 | `ship` | After review | Per repo: integration branch, base branch, merge order, latest verify result. |
 
-The grant is what the build agents may do without asking again: commit and push to ticket branches, make Jira transitions, open draft PRs. It never covers pushes to `main`, `master` or `Release*`, force-push after review, deploys, or production data writes. A hook denial is final: git pushes and `gh pr` writes are hook-confirmed (as are Atlassian MCP writes); `gh issue`, `gh label` and `gh api` tracker writes, and other MCP tracker writes such as Linear, are covered only by the grant.
+The grant is what the build agents may do without asking again: commit and push to ticket branches, make Jira transitions, open draft PRs. It never covers pushes to `main`, `master` or `Release*`, force-push after review, deploys, or production data writes. A hook denial is final: git pushes and `gh pr create|merge|edit|ready` are hook-confirmed (as are Atlassian MCP writes); other `gh pr` writes (close, comment, review), `gh issue`, `gh label` and `gh api` tracker writes, and other MCP tracker writes such as Linear, are covered only by the grant.
 
 ## The build loop
 
@@ -303,7 +303,7 @@ To rename any of these for your workspace, override them in `settings.json`:
 Some steps only a person can do: request a credential, flip a flag in a console, get a sign-off. A ticket with `kind: human` models it. It has no repo, is never dispatched to an implementer, and sits in the graph like any ticket, so other tickets can be blocked by it.
 
 - **Waiting on you.** `/kinetic:status` and the board list human tickets whose blockers are satisfied under "Waiting on you".
-- **Only human work left.** When nothing is ready or running, agent tickets remain un-merged, and every remaining ticket is human or behind a human ticket you can act on, the run pauses and says so instead of reporting a stall; say `ship` to continue with those human tickets open. The build loop ends once every agent ticket is merged, so human tickets still open then are carried into review and ship as open items.
+- **Only human work left.** When nothing is ready or running, agent tickets remain un-merged, and every remaining ticket is human or behind a human ticket you can act on, the run pauses and says so instead of reporting a stall; say `ship` to continue with those human tickets open; ship then lists the agent tickets still behind them as not merged and makes them merge blockers. The build loop ends once every agent ticket is merged, so human tickets still open then are carried into review and ship as open items.
 - **`human-done`.** `python3 -m kinetic.state human-done --run <run_dir> --id <id> [--note "..."]` marks it done. `set-ticket` refuses `done` on a human ticket. An edge onto a human blocker is satisfied when it is `done`, whatever its edge type.
 - **`NEEDS_HUMAN`.** An implementer that hits a step only a person can do reports `NEEDS_HUMAN`. kinetic creates a new human ticket, blocks the original on it and parks the original until you finish it. The original keeps its repo and worktree.
 - **Ship.** Ship still opens draft PRs while a human ticket is open; open human tickets that block a repo's tickets appear as a merge blocker under Attention points and in Manual steps.
@@ -434,7 +434,7 @@ The 0.2.0 top-level `jira_project`, `slice_issue_type` and `child_issue_type` ke
 |---|---|---|
 | `completion_gate` | Stop | Blocks "done" while a repo has edits newer than its last passing verify, and names the command to run |
 | `isolation` | PreToolUse on file writes | Denies writes outside the registered repos and the run directory |
-| `confirm_write_ops` | PreToolUse on Bash and GitHub/Jira MCP writes | Denies `git push` to `main`, `master` or `Release*`; asks before other pushes, `gh pr` writes and Jira or GitHub write calls |
+| `confirm_write_ops` | PreToolUse on Bash and GitHub/Jira MCP writes | Denies `git push` to `main`, `master` or `Release*`; asks before other pushes, `gh pr create|merge|edit|ready` and Jira or GitHub MCP write calls |
 | `confirm_deploy` | PreToolUse on deploy and Tekton-trigger MCP calls | Asks first |
 | `record_edit` | PostToolUse on file writes | Records edits so the Stop gate can compare them with verifies |
 | `claim_run` | PostToolUse on Bash | Records the session that wrote the active-run pointer as the run's owner |
@@ -497,7 +497,7 @@ The suite covers every script module and every hook, plus an end-to-end test tha
 
 ## Status and known limitations
 
-kinetic is at 0.3.0 (see `.claude-plugin/plugin.json`); 0.3.0 adds trackers, human tickets, relationship types, the local board and the PR template override. The scripts and hooks are tested; the skills and agents have not yet been exercised in a live end-to-end run. `docs/plan/kinetic-v0-rulings.md` records every decision made while building it and the v0.2 backlog.
+kinetic is at 0.3.1 (see `.claude-plugin/plugin.json`); 0.3.0 adds trackers, human tickets, relationship types, the local board and the PR template override, and 0.3.1 corrects the hook wording, flags unmerged agent tickets at ship, and keeps file modes on atomic writes. The scripts and hooks are tested; the skills and agents have not yet been exercised in a live end-to-end run. `docs/plan/kinetic-v0-rulings.md` records every decision made while building it and the v0.2 backlog.
 
 Not yet verified in a live session:
 
@@ -512,7 +512,7 @@ Known limitations:
 - `gh api` calls (including merges) pass the write-ops hook, and base branches other than `main`, `master` and `Release*` are not protected.
 - Isolation cannot tell implementers apart within the run directory.
 - Until a session claims the run, or when a hook payload has no session id, the run-scoped hooks act on every session.
-- Hook confirmation: git pushes and `gh pr` writes are hook-confirmed (as are Atlassian MCP writes); `gh issue`, `gh label` and `gh api` tracker writes, and other MCP tracker writes such as Linear, are covered only by the grant.
+- Hook confirmation: git pushes and `gh pr create|merge|edit|ready` are hook-confirmed (as are Atlassian MCP writes); other `gh pr` writes (close, comment, review), `gh issue`, `gh label` and `gh api` tracker writes, and other MCP tracker writes such as Linear, are covered only by the grant.
 - No skill evals yet; `/kinetic:status` shows no PR health or Jira transitions.
 
 ## License

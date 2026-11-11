@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 
 from kinetic import frontier, graph, state
@@ -114,16 +112,7 @@ def write_header(run_dir, ticket_id: str) -> Path:
         pass
     elif tail and tail[0].strip() and not _BOLD.match(tail[0]) and not region:
         tail = [""] + tail  # keep inserted header apart from body text
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines[:start] + missing + region + tail))
-        os.replace(tmp, p)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+    state.atomic_write(p, "\n".join(lines[:start] + missing + region + tail))
     return p
 
 
