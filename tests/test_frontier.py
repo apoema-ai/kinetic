@@ -129,6 +129,12 @@ class HumanFrontierTest(unittest.TestCase):
         self.assertEqual(frontier.ready(s), ["C"])
         self.assertFalse(frontier.only_human_left(s))
 
+    def test_stalled_upstream_of_human_is_not_only_human_left(self):
+        s = S({"A": t("r1", "done"), "H": t(None, kind="human", blocked_by=[edge("A", "snapshot")]),
+               "B": t("r2", blocked_by=[edge("H", "merge")])})
+        self.assertEqual(frontier.waiting_on_you(s), [])
+        self.assertFalse(frontier.only_human_left(s))
+
     def test_soft_precedence_orders_ready(self):
         s = S({"A": t("r1", after=["B"]), "B": t("r2")})
         self.assertEqual(frontier.ready(s), ["B", "A"])

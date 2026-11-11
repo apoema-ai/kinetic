@@ -66,7 +66,8 @@ def waiting_on_you(st: dict) -> list[str]:
 
 def only_human_left(st: dict) -> bool:
     tickets = st["tickets"]
-    if ready(st) or any(t["status"] in OCCUPYING for t in tickets.values()):
+    # a person must actually be able to act now, else the stall is elsewhere
+    if ready(st) or not waiting_on_you(st) or any(t["status"] in OCCUPYING for t in tickets.values()):
         return False
     todo = [i for i, t in tickets.items() if t["status"] == "todo"]
     if not todo:
