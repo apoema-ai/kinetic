@@ -90,6 +90,23 @@ class StateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             state.record_verify(self.run_dir, None, 0, "l.txt")
 
+    def test_record_verify_explicit_at(self):
+        state.init(self.run_dir, "quick", "Q-1")
+        state.record_verify(self.run_dir, "T1", 0, "l.txt", at="2000-01-01T00:00:00+00:00")
+        self.assertEqual(state.load(self.run_dir)["verify"]["T1"]["at"], "2000-01-01T00:00:00+00:00")
+
+    def test_record_verify_stores_repo(self):  # R14
+        state.init(self.run_dir, "epic", "E-1")
+        state.set_ticket(self.run_dir, "T1", repo="api")
+        state.set_ticket(self.run_dir, "T2")
+        state.record_verify(self.run_dir, "T1", 0, "l")
+        state.record_verify(self.run_dir, "T2", 0, "l")
+        state.record_verify(self.run_dir, "T3", 0, "l", repo_name="web")
+        state.record_verify(self.run_dir, None, 0, "l", repo_name="db")
+        v = state.load(self.run_dir)["verify"]
+        self.assertEqual([v["T1"]["repo"], v["T2"]["repo"], v["T3"]["repo"], v["repo:db"]["repo"]],
+                         ["api", None, "web", "db"])
+
     def test_gate_and_ruling(self):
         state.init(self.run_dir, "feature", "F-1")
         state.record_gate(self.run_dir, "ship", True, "ok")

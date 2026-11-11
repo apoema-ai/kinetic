@@ -111,12 +111,18 @@ def set_repo(run_dir, name: str, path: str, integration_branch: str) -> dict:
     return _mutate(run_dir, fn)
 
 
-def record_verify(run_dir, ticket_id, exit_code: int, log_path: str, repo_name=None) -> None:
+def record_verify(run_dir, ticket_id, exit_code: int, log_path: str, repo_name=None,
+                  at: str | None = None) -> None:
     if ticket_id is None and not repo_name:
         raise ValueError("repo_name is required when ticket_id is None")
     key = ticket_id if ticket_id is not None else f"repo:{repo_name}"
-    _mutate(run_dir, lambda s: s["verify"].__setitem__(
-        key, {"exit_code": exit_code, "log_path": log_path, "at": _now()}))
+    stamp = at or _now()
+
+    def fn(s):
+        repo = repo_name or s["tickets"].get(ticket_id, {}).get("repo")
+        s["verify"][key] = {"exit_code": exit_code, "log_path": log_path, "at": stamp,
+                            "repo": repo}
+    _mutate(run_dir, fn)
 
 
 def record_edit(run_dir, path: str) -> None:
@@ -187,7 +193,8 @@ def main(argv=None) -> int:
     cmd("set-repo", ("--name", {"required": True}), ("--path", {"required": True}),
         ("--integration-branch", {"required": True}))
     cmd("record-verify", ("--ticket", {"default": None}), ("--exit-code", {"type": int, "required": True}),
-        ("--log-path", {"required": True}), ("--repo-name", {"default": None}))
+        ("--log-path", {"required": True}), ("--repo-name", {"default": None}),
+        ("--at", {"default": None}))
     cmd("record-edit", ("--path", {"required": True}))
     cmd("record-gate", ("--gate", {"required": True}), ("--approved", {"type": _bool, "required": True}),
         ("--note", {"default": ""}))
@@ -209,7 +216,7 @@ def main(argv=None) -> int:
         elif a.cmd == "set-repo":
             out = set_repo(a.run, a.name, a.path, a.integration_branch)
         elif a.cmd == "record-verify":
-            record_verify(a.run, a.ticket, a.exit_code, a.log_path, a.repo_name)
+            record_verify(a.run, a.ticket, a.exit_code, a.log_path, a.repo_name, a.at)
             out = load(a.run)["verify"]
         elif a.cmd == "record-edit":
             record_edit(a.run, a.path)
