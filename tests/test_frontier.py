@@ -12,9 +12,14 @@ from kinetic import frontier, state
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def t(repo, status="todo", blocked_by=(), published=False):
-    return {"repo": repo, "status": status, "blocked_by": [dict(b) for b in blocked_by],
-            "snapshot_published": published}
+def t(repo, status="todo", blocked_by=(), published=False, kind="agent", after=()):
+    d = {"repo": repo, "status": status, "blocked_by": [dict(b) for b in blocked_by],
+         "snapshot_published": published}
+    if kind != "agent":  # agent tickets stay legacy-shaped: no kind key
+        d["kind"] = kind
+    if after:
+        d["after"] = list(after)
+    return d
 
 
 def S(tickets):
@@ -95,7 +100,70 @@ class FrontierTest(unittest.TestCase):
                                capture_output=True, text=True, cwd=str(ROOT),
                                env={"PYTHONPATH": str(ROOT / "scripts"), "PATH": "/usr/bin:/bin"})
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(json.loads(r.stdout), {"ready": ["A"]})
+            self.assertEqual(json.loads(r.stdout),
+                             {"ready": ["A"], "waiting_on_you": [], "only_human_left": False})
+
+
+class HumanFrontierTest(unittest.TestCase):
+    def test_human_ticket_not_dispatched(self):
+        s = S({"H": t(None, kind="human")})
+        self.assertEqual(frontier.ready(s), [])
+        self.assertEqual(frontier.waiting_on_you(s), ["H"])
+
+    def test_edge_onto_human_satisfied_when_done(self):
+        s = S({"H": t(None, "done", kind="human"), "B": t("r2", blocked_by=[edge("H", "merge")])})
+        self.assertEqual(frontier.ready(s), ["B"])
+
+    def test_edge_onto_human_waits_while_todo(self):
+        s = S({"H": t(None, kind="human"), "B": t("r2", blocked_by=[edge("H", "merge")])})
+        self.assertEqual(frontier.ready(s), [])
+        self.assertTrue(frontier.only_human_left(s))
+
+    def test_snapshot_stall_is_not_only_human_left(self):
+        s = S({"A": t("r1", "done"), "B": t("r2", blocked_by=[edge("A", "snapshot")])})
+        self.assertFalse(frontier.only_human_left(s))
+
+    def test_independent_agent_work_continues(self):
+        s = S({"H": t(None, kind="human"), "B": t("r2", blocked_by=[edge("H", "merge")]),
+               "C": t("r3")})
+        self.assertEqual(frontier.ready(s), ["C"])
+        self.assertFalse(frontier.only_human_left(s))
+
+    def test_soft_precedence_orders_ready(self):
+        s = S({"A": t("r1", after=["B"]), "B": t("r2")})
+        self.assertEqual(frontier.ready(s), ["B", "A"])
+
+    def test_legacy_ticket_without_new_fields(self):
+        s = S({"A": t("r1"), "B": t("r1"), "C": t("r2")})
+        self.assertNotIn("kind", s["tickets"]["A"])
+        self.assertEqual(frontier.ready(s), ["A", "C"])
+        self.assertEqual(frontier.waiting_on_you(s), [])
+
+    def test_waiting_on_you_needs_satisfied_blockers_and_cycle_is_empty(self):
+        s = S({"A": t("r1"), "H": t(None, kind="human", blocked_by=[edge("A", "merge")])})
+        self.assertEqual(frontier.waiting_on_you(s), [])
+        s["tickets"]["A"]["status"] = "merged"
+        self.assertEqual(frontier.waiting_on_you(s), ["H"])
+        cyc = S({"X": t(None, kind="human", blocked_by=[edge("Y", "merge")]),
+                 "Y": t(None, kind="human", blocked_by=[edge("X", "merge")])})
+        self.assertEqual(frontier.waiting_on_you(cyc), [])
+
+    def test_only_human_left_false_when_occupied_or_nothing_todo(self):
+        s = S({"H": t(None, kind="human"), "R": t("r1", "running")})
+        self.assertFalse(frontier.only_human_left(s))
+        self.assertFalse(frontier.only_human_left(S({"A": t("r1", "merged")})))
+
+    def test_cli_prints_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            state.init(d, "epic", "X-1")
+            def add(s):
+                s["tickets"] = {"H": t(None, kind="human")}
+            state._mutate(d, add)
+            r = subprocess.run([sys.executable, "-m", "kinetic.frontier", "--run", d],
+                               capture_output=True, text=True, cwd=str(ROOT),
+                               env={"PYTHONPATH": str(ROOT / "scripts"), "PATH": "/usr/bin:/bin"})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(set(json.loads(r.stdout)), {"ready", "waiting_on_you", "only_human_left"})
 
 
 if __name__ == "__main__":

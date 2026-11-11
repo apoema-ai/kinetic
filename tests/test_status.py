@@ -30,14 +30,22 @@ class StatusTest(unittest.TestCase):
         }))
         self.assertIn("feature", out.splitlines()[0])
         self.assertIn("build", out.splitlines()[0])
-        self.assertIn("| id | repo | status | blocked by |", out)
-        self.assertIn("| A-1 | api | done | — |", out)
-        self.assertIn("| B-2 | web | todo | A-1 (merge), C (snapshot) |", out)
+        self.assertIn("| id | kind | repo | status | blocked by |", out)
+        self.assertIn("| A-1 | agent | api | done | — |", out)
+        self.assertIn("| B-2 | agent | web | todo | A-1 (merge), C (snapshot) |", out)
 
     def test_render_ready_line(self):
         out = status.render(S({"A": t("api")}))
         self.assertIn("Ready: A", out)
         self.assertIn("Ready: none", status.render(S({"A": t("api", "done")})))
+
+    def test_render_shows_waiting_on_you(self):
+        h = {"repo": None, "status": "todo", "blocked_by": [], "snapshot_published": False,
+             "kind": "human"}
+        out = status.render(S({"H": h}))
+        self.assertIn("Waiting on you: H", out)
+        self.assertIn("| H | human | — | todo | — |", out)
+        self.assertIn("Waiting on you: none", status.render(S({"A": t("api")})))
 
     def test_render_gates(self):
         out = status.render(S({}, {"spec": {"approved": True}, "ship": {"approved": False}}))
@@ -52,7 +60,7 @@ class StatusTest(unittest.TestCase):
                                capture_output=True, text=True,
                                env={**os.environ, "PYTHONPATH": str(ROOT / "scripts")})
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn("| X-1 | api | todo | — |", r.stdout)
+            self.assertIn("| X-1 | agent | api | todo | — |", r.stdout)
 
 
 if __name__ == "__main__":

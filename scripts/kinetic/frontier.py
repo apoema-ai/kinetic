@@ -12,8 +12,14 @@ MERGED = {"merged", "released"}
 OCCUPYING = {"running", "needs_decision", "blocked"}
 
 
+def _human(t: dict) -> bool:
+    return state.field(t, "kind") == "human"
+
+
 def _satisfied(edge: dict, blocker: dict) -> bool:
     st, typ = blocker["status"], edge["type"]
+    if _human(blocker):
+        return st in DONE  # a person finishing it is the only signal; edge types do not apply
     if typ == "snapshot":
         return st in DONE and bool(blocker.get("snapshot_published"))
     if typ == "merge":
@@ -36,12 +42,46 @@ def ready(st: dict, cap: int = 3) -> list[str]:
         if len(running) + len(out) >= cap:
             break
         t = tickets[i]
-        if t["status"] != "todo" or not t.get("repo") or t["repo"] in busy:
+        if _human(t) or t["status"] != "todo" or not t.get("repo") or t["repo"] in busy:
             continue
-        if all(e["id"] in tickets and _satisfied(e, tickets[e["id"]]) for e in t["blocked_by"]):
+        if _unblocked(t, tickets):
             out.append(i)
             busy.add(t["repo"])
     return out
+
+
+def _unblocked(t: dict, tickets: dict) -> bool:
+    return all(e["id"] in tickets and _satisfied(e, tickets[e["id"]]) for e in t["blocked_by"])
+
+
+def waiting_on_you(st: dict) -> list[str]:
+    tickets = st["tickets"]
+    try:
+        order = graph.topo_order(tickets)
+    except ValueError:
+        return []
+    return [i for i in order if _human(tickets[i]) and tickets[i]["status"] == "todo"
+            and _unblocked(tickets[i], tickets)]
+
+
+def only_human_left(st: dict) -> bool:
+    tickets = st["tickets"]
+    if ready(st) or any(t["status"] in OCCUPYING for t in tickets.values()):
+        return False
+    todo = [i for i, t in tickets.items() if t["status"] == "todo"]
+    if not todo:
+        return False
+
+    def human_todo(i: str) -> bool:
+        return _human(tickets[i]) and tickets[i]["status"] == "todo"
+
+    return all(human_todo(i) or any(u in tickets and human_todo(u) for u in graph._upstream(tickets, i))
+               for i in todo)
+
+
+def report(st: dict, cap: int = 3) -> dict:
+    return {"ready": ready(st, cap), "waiting_on_you": waiting_on_you(st),
+            "only_human_left": only_human_left(st)}
 
 
 def main(argv=None) -> int:
@@ -50,7 +90,7 @@ def main(argv=None) -> int:
     p.add_argument("--cap", type=int, default=3)
     a = p.parse_args(argv)
     try:
-        print(json.dumps({"ready": ready(state.load(a.run), a.cap)}))
+        print(json.dumps(report(state.load(a.run), a.cap)))
     except (ValueError, OSError, KeyError) as e:
         print(str(e), file=sys.stderr)
         return 1
