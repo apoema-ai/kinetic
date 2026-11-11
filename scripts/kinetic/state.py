@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,8 +15,12 @@ STATUSES = ("todo", "running", "done", "done_with_concerns", "needs_decision",
             "blocked", "merged", "released")
 
 
+PHASES = ("intake", "grill", "spec", "tickets", "build", "review", "ship", "retro", "done")
+EDGE_TYPES = ("snapshot", "merge", "release")
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def _file(run_dir) -> Path:
@@ -28,68 +34,113 @@ def load(run_dir) -> dict:
 def save(run_dir, state: dict) -> None:
     f = _file(run_dir)
     f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_name(f.name + ".tmp")
-    tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
-    os.replace(tmp, f)
+    fd, tmp = tempfile.mkstemp(dir=str(f.parent), prefix="state.json.")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(state, indent=2, sort_keys=True))
+        os.replace(tmp, f)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
-def init(run_dir, lane: str, ref: str) -> dict:
+def _mutate(run_dir, fn) -> dict:
+    """Exclusive-locked load -> fn(state) -> save; returns the saved state."""
+    Path(run_dir).mkdir(parents=True, exist_ok=True)
+    with open(Path(run_dir) / "state.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = load(run_dir)
+        fn(state)
+        save(run_dir, state)
+        return state
+
+
+def init(run_dir, lane: str, ref: str, force: bool = False) -> dict:
     if lane not in LANES:
         raise ValueError(f"invalid lane '{lane}': expected one of {LANES}")
+    Path(run_dir).mkdir(parents=True, exist_ok=True)
     state = {
         "run_id": uuid.uuid4().hex[:12], "run_dir": str(run_dir), "lane": lane,
         "ref": ref, "phase": "intake", "tickets": {}, "slices": [], "repos": {},
         "gates": {}, "rulings": [], "verify": {}, "last_edit_at": None,
     }
-    save(run_dir, state)
+    with open(Path(run_dir) / "state.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if _file(run_dir).exists() and not force:
+            raise FileExistsError(f"state already exists in {run_dir}; use force to overwrite")
+        save(run_dir, state)
     return state
+
+
+def set_phase(run_dir, phase: str) -> dict:
+    if phase not in PHASES:
+        raise ValueError(f"invalid phase '{phase}': expected one of {PHASES}")
+    return _mutate(run_dir, lambda s: s.update(phase=phase))
+
+
+def _check_blocked_by(entries) -> None:
+    if not isinstance(entries, list):
+        raise ValueError("blocked_by must be a list")
+    for e in entries:
+        if not isinstance(e, dict) or "id" not in e or e.get("type") not in EDGE_TYPES:
+            raise ValueError(f"invalid blocked_by entry {e!r}: need id and type in {EDGE_TYPES}")
 
 
 def set_ticket(run_dir, ticket_id: str, **fields) -> dict:
     if "status" in fields and fields["status"] not in STATUSES:
         raise ValueError(f"invalid status '{fields['status']}': expected one of {STATUSES}")
-    state = load(run_dir)
-    t = state["tickets"].setdefault(ticket_id, {
-        "repo": None, "slice": None, "status": "todo", "blocked_by": [],
-        "branch": None, "report": None, "snapshot_published": False,
-    })
-    t.update(fields)
-    save(run_dir, state)
-    return state
+    if "blocked_by" in fields:
+        _check_blocked_by(fields["blocked_by"])
+
+    def fn(state):
+        t = state["tickets"].setdefault(ticket_id, {
+            "repo": None, "slice": None, "status": "todo", "blocked_by": [],
+            "branch": None, "report": None, "snapshot_published": False,
+        })
+        t.update(fields)
+
+    return _mutate(run_dir, fn)
 
 
 def set_repo(run_dir, name: str, path: str, integration_branch: str) -> dict:
-    state = load(run_dir)
-    state["repos"][name] = {"path": str(path), "integration_branch": integration_branch}
-    save(run_dir, state)
-    return state
+    def fn(state):
+        state["repos"].setdefault(name, {}).update(
+            {"path": str(path), "integration_branch": integration_branch})
+
+    return _mutate(run_dir, fn)
 
 
 def record_verify(run_dir, ticket_id, exit_code: int, log_path: str, repo_name=None) -> None:
     if ticket_id is None and not repo_name:
         raise ValueError("repo_name is required when ticket_id is None")
-    state = load(run_dir)
     key = ticket_id if ticket_id is not None else f"repo:{repo_name}"
-    state["verify"][key] = {"exit_code": exit_code, "log_path": log_path, "at": _now()}
-    save(run_dir, state)
+    _mutate(run_dir, lambda s: s["verify"].__setitem__(
+        key, {"exit_code": exit_code, "log_path": log_path, "at": _now()}))
 
 
 def record_edit(run_dir, path: str) -> None:
-    state = load(run_dir)
-    state["last_edit_at"] = _now()
-    save(run_dir, state)
+    real = os.path.realpath(path)
+
+    def fn(state):
+        for repo in state["repos"].values():
+            rp = os.path.realpath(repo["path"])
+            if real == rp or real.startswith(rp + os.sep):
+                repo["last_edit_at"] = _now()
+                return
+        state["last_edit_at"] = _now()
+
+    _mutate(run_dir, fn)
 
 
 def record_gate(run_dir, gate: str, approved: bool, note: str = "") -> None:
-    state = load(run_dir)
-    state["gates"][gate] = {"approved": approved, "note": note, "at": _now()}
-    save(run_dir, state)
+    _mutate(run_dir, lambda s: s["gates"].__setitem__(
+        gate, {"approved": approved, "note": note, "at": _now()}))
 
 
 def add_ruling(run_dir, what: str, why: str, cost: str) -> None:
-    state = load(run_dir)
-    state["rulings"].append({"what": what, "why": why, "cost": cost, "at": _now()})
-    save(run_dir, state)
+    _mutate(run_dir, lambda s: s["rulings"].append(
+        {"what": what, "why": why, "cost": cost, "at": _now()}))
 
 
 def stale_running(state: dict, reports_dir) -> list:
@@ -98,7 +149,23 @@ def stale_running(state: dict, reports_dir) -> list:
 
 
 def _bool(v: str) -> bool:
-    return v.lower() in ("1", "true", "yes", "y")
+    if v.lower() in ("1", "true", "yes", "y"):
+        return True
+    if v.lower() in ("0", "false", "no", "n"):
+        return False
+    raise argparse.ArgumentTypeError(f"invalid boolean '{v}'")
+
+
+def _parse_field(kv: str):
+    k, sep, v = kv.partition("=")
+    if not sep or not k:
+        raise ValueError(f"invalid --field '{kv}': expected KEY=VALUE")
+    if v[:1] in ("[", "{") or (k == "snapshot_published" and v in ("true", "false")):
+        try:
+            return k, json.loads(v)
+        except ValueError:
+            raise ValueError(f"invalid JSON for field '{k}': {v}")
+    return k, v
 
 
 def main(argv=None) -> int:
@@ -111,7 +178,9 @@ def main(argv=None) -> int:
         for a, kw in args:
             sp.add_argument(a, **kw)
 
-    cmd("init", ("--lane", {"required": True}), ("--ref", {"required": True}))
+    cmd("init", ("--lane", {"required": True}), ("--ref", {"required": True}),
+        ("--force", {"action": "store_true"}))
+    cmd("set-phase", ("--phase", {"required": True}))
     cmd("load")
     cmd("set-ticket", ("--id", {"required": True}),
         ("--field", {"action": "append", "default": [], "metavar": "KEY=VALUE"}))
@@ -129,18 +198,13 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "init":
-            out = init(Path(a.run), a.lane, a.ref)
+            out = init(Path(a.run), a.lane, a.ref, a.force)
+        elif a.cmd == "set-phase":
+            out = set_phase(a.run, a.phase)
         elif a.cmd == "load":
             out = load(a.run)
         elif a.cmd == "set-ticket":
-            fields = {}
-            for kv in a.field:
-                k, _, v = kv.partition("=")
-                # JSON-decode values (lists, bools); fall back to plain string
-                try:
-                    fields[k] = json.loads(v)
-                except ValueError:
-                    fields[k] = v
+            fields = dict(_parse_field(kv) for kv in a.field)
             out = set_ticket(a.run, a.id, **fields)
         elif a.cmd == "set-repo":
             out = set_repo(a.run, a.name, a.path, a.integration_branch)
@@ -158,7 +222,7 @@ def main(argv=None) -> int:
             out = load(a.run)["rulings"]
         else:
             out = stale_running(load(a.run), Path(a.run) / "reports")
-    except (ValueError, OSError, KeyError) as e:
+    except (ValueError, OSError, KeyError, FileExistsError) as e:
         print(str(e), file=sys.stderr)
         return 1
     print(json.dumps(out))

@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import multiprocessing
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from kinetic import state
+
+
+def _writer(args):
+    run_dir, n = args
+    for i in range(25):
+        state.set_ticket(run_dir, f"P{n}-{i}", status="todo")
 
 
 class StateTest(unittest.TestCase):
@@ -87,6 +97,77 @@ class StateTest(unittest.TestCase):
         s = state.load(self.run_dir)
         self.assertTrue(s["gates"]["ship"]["approved"])
         self.assertEqual(s["rulings"][0]["what"], "what")
+
+    def test_concurrent_writers_keep_all_updates(self):
+        state.init(self.run_dir, "epic", "E-1")
+        with multiprocessing.Pool(4) as pool:
+            pool.map(_writer, [(str(self.run_dir), n) for n in range(4)])
+        self.assertEqual(len(state.load(self.run_dir)["tickets"]), 100)
+
+    def test_set_phase(self):  # R11
+        state.init(self.run_dir, "quick", "Q-1")
+        self.assertEqual(state.set_phase(self.run_dir, "build")["phase"], "build")
+        with self.assertRaises(ValueError):
+            state.set_phase(self.run_dir, "nope")
+
+    def test_record_edit_routes_by_repo(self):  # R12
+        state.init(self.run_dir, "epic", "E-1")
+        repo = Path(self._tmp.name) / "repo"
+        repo.mkdir()
+        state.set_repo(self.run_dir, "api", str(repo), "int")
+        state.record_edit(self.run_dir, str(repo / "a.py"))
+        s = state.load(self.run_dir)
+        self.assertIsNotNone(s["repos"]["api"]["last_edit_at"])
+        self.assertIsNone(s["last_edit_at"])
+        state.record_edit(self.run_dir, str(Path(self._tmp.name) / "other.py"))
+        self.assertIsNotNone(state.load(self.run_dir)["last_edit_at"])
+
+    def test_init_refuses_existing_unless_force(self):
+        state.init(self.run_dir, "quick", "Q-1")
+        with self.assertRaises(FileExistsError):
+            state.init(self.run_dir, "quick", "Q-2")
+        self.assertEqual(state.init(self.run_dir, "quick", "Q-2", force=True)["ref"], "Q-2")
+
+    def test_blocked_by_validated(self):
+        state.init(self.run_dir, "epic", "E-1")
+        with self.assertRaises(ValueError):
+            state.set_ticket(self.run_dir, "T1", blocked_by=[{"id": "T0", "type": "bogus"}])
+        with self.assertRaises(ValueError):
+            state.set_ticket(self.run_dir, "T1", blocked_by=[{"type": "merge"}])
+
+
+class CliTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.run_dir = str(Path(self._tmp.name) / "run")
+
+    def cli(self, *args):
+        env = dict(os.environ, PYTHONPATH="scripts")
+        return subprocess.run([sys.executable, "-m", "kinetic.state", *args, "--run", self.run_dir],
+                              capture_output=True, text=True, env=env)
+
+    def test_set_ticket_blocked_by_and_string_value(self):
+        self.assertEqual(self.cli("init", "--lane", "epic", "--ref", "E").returncode, 0)
+        r = self.cli("set-ticket", "--id", "T1", "--field", 'blocked_by=[{"id":"T0","type":"merge"}]',
+                     "--field", "branch=123")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        t = state.load(self.run_dir)["tickets"]["T1"]
+        self.assertEqual(t["blocked_by"], [{"id": "T0", "type": "merge"}])
+        self.assertEqual(t["branch"], "123")
+
+    def test_bad_edge_type_and_missing_equals_fail(self):
+        self.cli("init", "--lane", "epic", "--ref", "E")
+        r = self.cli("set-ticket", "--id", "T1", "--field", 'blocked_by=[{"id":"T0","type":"x"}]')
+        self.assertNotEqual(r.returncode, 0)
+        r = self.cli("set-ticket", "--id", "T1", "--field", "noequals")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_invalid_boolean_rejected(self):
+        self.cli("init", "--lane", "epic", "--ref", "E")
+        r = self.cli("record-gate", "--gate", "ship", "--approved", "ture")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(state.load(self.run_dir)["gates"], {})
 
 
 if __name__ == "__main__":
