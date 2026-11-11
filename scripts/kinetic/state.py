@@ -109,22 +109,64 @@ def done_refusal(state: dict, ticket_id: str):
     return None
 
 
+KINDS = ("agent", "human")
+
+
+def ticket_defaults() -> dict:
+    return {
+        "repo": None, "slice": None, "status": "todo", "blocked_by": [],
+        "branch": None, "report": None, "snapshot_published": False,
+        "kind": "agent", "after": [], "ships_with": None, "related": [],
+        "human_note": None, "done_by": None,
+    }
+
+
+def field(t: dict, name: str):
+    """Ticket field with the default for tickets written before the field existed."""
+    return t.get(name, ticket_defaults()[name])
+
+
+def _check_fields(fields: dict) -> None:
+    if "kind" in fields and fields["kind"] not in KINDS:
+        raise ValueError(f"invalid kind '{fields['kind']}': expected one of {KINDS}")
+    for k in ("after", "related"):
+        if k in fields and not (isinstance(fields[k], list) and all(isinstance(x, str) for x in fields[k])):
+            raise ValueError(f"{k} must be a list of strings")
+    if fields.get("ships_with") is not None and not isinstance(fields["ships_with"], str):
+        raise ValueError("ships_with must be a string or null")
+
+
 def set_ticket(run_dir, ticket_id: str, require_verify: bool = False, **fields) -> dict:
     if "status" in fields and fields["status"] not in STATUSES:
         raise ValueError(f"invalid status '{fields['status']}': expected one of {STATUSES}")
     if "blocked_by" in fields:
         _check_blocked_by(fields["blocked_by"])
+    _check_fields(fields)
 
     def fn(state):
-        if require_verify and fields.get("status") in DONE_STATUSES:
-            reason = done_refusal(state, ticket_id)
-            if reason:
-                raise ValueError(reason)
-        t = state["tickets"].setdefault(ticket_id, {
-            "repo": None, "slice": None, "status": "todo", "blocked_by": [],
-            "branch": None, "report": None, "snapshot_published": False,
-        })
+        existing = state["tickets"].get(ticket_id, {})
+        if fields.get("status") in DONE_STATUSES:
+            if fields.get("kind", field(existing, "kind")) == "human":
+                raise ValueError(f"ticket {ticket_id} is a human ticket: mark it done with "
+                                 "`kinetic.state human-done`")
+            if require_verify:
+                reason = done_refusal(state, ticket_id)
+                if reason:
+                    raise ValueError(reason)
+        t = state["tickets"].setdefault(ticket_id, ticket_defaults())
         t.update(fields)
+
+    return _mutate(run_dir, fn)
+
+
+def human_done(run_dir, ticket_id: str, note: str | None = None) -> dict:
+    def fn(state):
+        t = state["tickets"].get(ticket_id)
+        if t is None:
+            raise ValueError(f"ticket {ticket_id} not found")
+        if field(t, "kind") != "human":
+            raise ValueError(f"ticket {ticket_id} is not kind=human; human-done applies only to human tickets")
+        t.update(status="done", done_by="human", human_note=note)
 
     return _mutate(run_dir, fn)
 
@@ -215,6 +257,8 @@ def _parse_field(kv: str):
             return k, json.loads(v.lower() if k == "snapshot_published" else v)
         except ValueError:
             raise ValueError(f"invalid JSON for field '{k}': {v}")
+    if v == "null" and k in ("ships_with", "human_note"):
+        return k, None
     return k, v
 
 
@@ -235,6 +279,7 @@ def main(argv=None) -> int:
     cmd("set-slices", ("--slices", {"required": True, "metavar": "JSON_LIST"}))
     cmd("set-ticket", ("--id", {"required": True}),
         ("--field", {"action": "append", "default": [], "metavar": "KEY=VALUE"}))
+    cmd("human-done", ("--id", {"required": True}), ("--note", {"default": None}))
     cmd("set-repo", ("--name", {"required": True}), ("--path", {"required": True}),
         ("--integration-branch", {"required": True}))
     cmd("record-verify", ("--ticket", {"default": None}), ("--exit-code", {"type": int, "required": True}),
@@ -260,6 +305,8 @@ def main(argv=None) -> int:
         elif a.cmd == "set-ticket":
             fields = dict(_parse_field(kv) for kv in a.field)
             out = set_ticket(a.run, a.id, require_verify=True, **fields)
+        elif a.cmd == "human-done":
+            out = human_done(a.run, a.id, a.note)
         elif a.cmd == "set-repo":
             out = set_repo(a.run, a.name, a.path, a.integration_branch)
         elif a.cmd == "record-verify":

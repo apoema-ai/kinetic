@@ -283,5 +283,78 @@ class CliTest(unittest.TestCase):
         self.assertEqual(state.load(self.run_dir)["gates"], {})
 
 
+class HumanTicketTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.run_dir = str(Path(self._tmp.name) / "run")
+        state.init(self.run_dir, "epic", "E")
+
+    def ticket(self, tid):
+        return state.load(self.run_dir)["tickets"][tid]
+
+    def test_defaults_include_new_fields(self):
+        state.set_ticket(self.run_dir, "A", repo="r")
+        t = self.ticket("A")
+        self.assertEqual(t["kind"], "agent")
+        self.assertEqual(t["after"], [])
+        self.assertIsNone(t["ships_with"])
+        self.assertEqual(t["related"], [])
+        self.assertIsNone(t["human_note"])
+        self.assertIsNone(t["done_by"])
+
+    def test_field_falls_back_for_old_tickets(self):
+        self.assertEqual(state.field({"repo": "r"}, "kind"), "agent")
+        self.assertEqual(state.field({"kind": "human"}, "kind"), "human")
+
+    def test_invalid_field_values_rejected(self):
+        for bad in ({"kind": "robot"}, {"after": "A"}, {"after": [1]}, {"related": [None]},
+                    {"ships_with": 3}):
+            with self.assertRaises(ValueError, msg=bad):
+                state.set_ticket(self.run_dir, "A", **bad)
+        with self.assertRaisesRegex(ValueError, "kind"):
+            state.set_ticket(self.run_dir, "A", kind="robot")
+
+    def test_human_done_sets_fields_without_verify(self):
+        state.set_ticket(self.run_dir, "H", kind="human")
+        t = state.human_done(self.run_dir, "H", "tf apply ok")["tickets"]["H"]
+        self.assertEqual(t["status"], "done")
+        self.assertEqual(t["done_by"], "human")
+        self.assertEqual(t["human_note"], "tf apply ok")
+        self.assertEqual(state.load(self.run_dir)["verify"], {})
+
+    def test_human_done_rejects_agent_ticket(self):
+        state.set_ticket(self.run_dir, "A")
+        with self.assertRaisesRegex(ValueError, "kind=human"):
+            state.human_done(self.run_dir, "A")
+
+    def test_human_done_rejects_missing_ticket(self):
+        with self.assertRaises(ValueError):
+            state.human_done(self.run_dir, "nope")
+
+    def test_set_ticket_done_refused_for_human(self):
+        state.set_ticket(self.run_dir, "H", kind="human")
+        with self.assertRaisesRegex(ValueError, "human-done"):
+            state.set_ticket(self.run_dir, "H", require_verify=True, status="done")
+        with self.assertRaisesRegex(ValueError, "human-done"):
+            state.set_ticket(self.run_dir, "H", status="done_with_concerns")
+
+    def test_set_ticket_kind_human_and_done_together_refused(self):
+        with self.assertRaises(ValueError):
+            state.set_ticket(self.run_dir, "N", require_verify=True, kind="human", status="done")
+        self.assertNotIn("N", state.load(self.run_dir)["tickets"])
+
+    def test_cli_human_done(self):
+        state.set_ticket(self.run_dir, "H", kind="human")
+        self.assertEqual(state.main(["human-done", "--run", self.run_dir, "--id", "H", "--note", "x"]), 0)
+        self.assertEqual(self.ticket("H")["human_note"], "x")
+
+    def test_cli_ships_with_null(self):
+        state.set_ticket(self.run_dir, "A", ships_with="B")
+        self.assertEqual(state.main(["set-ticket", "--run", self.run_dir, "--id", "A",
+                                     "--field", "ships_with=null"]), 0)
+        self.assertIsNone(self.ticket("A")["ships_with"])
+
+
 if __name__ == "__main__":
     unittest.main()
