@@ -37,11 +37,13 @@ Give each child ticket its **blocking edges**, each with a type:
 
 Use only these three types. A ticket with no blockers can start immediately. Use a `snapshot` edge between two repos only when the upstream repo's config has `publish_snapshot` and the downstream repo's has `pin` (read `~/.config/kinetic/repos.json` and each repo's `.kinetic.json`); without them the pin step cannot run and the downstream ticket never becomes ready, so use `merge`. Use `release` only when the downstream genuinely needs a released version: the orchestrator marks it released by hand, so say so in the ticket. Within one repo prefer `merge`.
 
+Give each child ticket its **interfaces**: what it `produces` that another ticket uses (an API endpoint, a client method, an event, a schema, a config key), and what it `consumes` from other tickets or from existing code. Use one stable name per interface across tickets, in the glossary's terms (for example `StatementClient.export` or `event:statement-exported`). A ticket that consumes what another ticket produces must be blocked by it, directly or through other tickets; `graph validate` reports it as an error otherwise.
+
 **Wide refactors are the exception to vertical slicing.** One mechanical change (rename a column, retype a shared symbol) whose blast radius fans across the codebase cannot land green as a single slice. Sequence it as expand-contract: expand (add the new form beside the old), migrate call sites in batches sized by blast radius (each batch its own ticket blocked by the expand), then contract (delete the old form, blocked by every migrate batch).
 
 ### 3. Quiz the user
 
-Present the breakdown as a numbered list. For each ticket show the title, its slice and repo, **Blocked by** (with edge types), and what it delivers end to end. Ask:
+Present the breakdown as a numbered list. For each ticket show the title, its slice and repo, **Blocked by** (with edge types), **Interfaces** (produces / consumes), and what it delivers end to end. Ask:
 
 - Does the granularity feel right (too coarse / too fine)?
 - Does each ticket depend only on tickets that genuinely gate it, with the right edge type?
@@ -65,12 +67,13 @@ Local ticket template:
 **Repo:** <repo>
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer list.
 **Blocked by:** `<ticket id>` (snapshot|merge|release), ... or "None (can start immediately)".
+**Interfaces:** produces `<name>`, ...; consumes `<name>`, ... (or "none").
 
 - [ ] Acceptance criterion 1
 - [ ] Acceptance criterion 2
 ```
 
-Jira issue bodies use the same content (Parent, What to build, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
+Jira issue bodies use the same content (Parent, What to build, Interfaces, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
 
 ### 5. Record in state
 
@@ -85,8 +88,10 @@ python3 -m kinetic.state set-slices --run <dir> --slices '["<slice-id>","<slice-
 Then, for every child ticket (`blocked_by` is a JSON list of `{"id","type"}`; use `[]` when none):
 
 ```
-python3 -m kinetic.state set-ticket --run <dir> --id <ticket-id> --field repo=<repo> --field slice=<slice-id> --field 'blocked_by=[{"id":"<blocker-id>","type":"snapshot"}]'
+python3 -m kinetic.state set-ticket --run <dir> --id <ticket-id> --field repo=<repo> --field slice=<slice-id> --field 'blocked_by=[{"id":"<blocker-id>","type":"snapshot"}]' --field 'produces=["<name>"]' --field 'consumes=["<name>"]'
 ```
+
+Omit `produces` or `consumes` when the ticket has none.
 
 Every slice id passed to `set-slices` must appear in at least one ticket's `slice` field. Do not edit `state.json` by hand.
 
@@ -96,7 +101,7 @@ Every slice id passed to `set-slices` must appear in at least one ticket's `slic
 python3 -m kinetic.graph validate --run <dir>
 ```
 
-It prints `{"errors": [...]}` and exits non-zero on errors (missing repo, unknown blocker, invalid edge type, cycle). Fix the tickets (re-run `set-ticket` and update the tracker) and re-run until `errors` is empty. Then print the build order with `python3 -m kinetic.graph topo --run <dir>`.
+It prints `{"errors": [...], "warnings": [...]}` and exits non-zero on errors (missing repo, unknown blocker, invalid edge type, cycle, a consumer with no edge to the ticket producing what it consumes). Warnings name interfaces that no ticket produces: confirm each already exists in the code, or add the missing ticket. Fix the tickets (re-run `set-ticket` and update the tracker) and re-run until `errors` is empty. Then print the build order with `python3 -m kinetic.graph topo --run <dir>`.
 
 The orchestrator runs the breakdown approval gate; do not set phases or gates here.
 

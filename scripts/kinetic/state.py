@@ -93,13 +93,33 @@ def _check_blocked_by(entries) -> None:
             raise ValueError(f"invalid blocked_by entry {e!r}: need id and type in {EDGE_TYPES}")
 
 
-def set_ticket(run_dir, ticket_id: str, **fields) -> dict:
+DONE_STATUSES = ("done", "done_with_concerns")
+
+
+def done_refusal(state: dict, ticket_id: str):
+    """Why ticket_id may not be marked done, or None: needs a passing verify newer than its edits."""
+    v = state.get("verify", {}).get(ticket_id)
+    if not v:
+        return f"ticket {ticket_id}: no verify record; run kinetic.verify with --ticket {ticket_id}"
+    if v.get("exit_code") != 0:
+        return f"ticket {ticket_id}: last verify failed (exit {v.get('exit_code')}), log {v.get('log_path')}"
+    repo = state.get("repos", {}).get(state["tickets"].get(ticket_id, {}).get("repo") or "", {})
+    if repo.get("last_edit_ticket") == ticket_id and (repo.get("last_edit_at") or "") > (v.get("at") or ""):
+        return f"ticket {ticket_id}: worktree edited after its last verify; re-run kinetic.verify"
+    return None
+
+
+def set_ticket(run_dir, ticket_id: str, require_verify: bool = False, **fields) -> dict:
     if "status" in fields and fields["status"] not in STATUSES:
         raise ValueError(f"invalid status '{fields['status']}': expected one of {STATUSES}")
     if "blocked_by" in fields:
         _check_blocked_by(fields["blocked_by"])
 
     def fn(state):
+        if require_verify and fields.get("status") in DONE_STATUSES:
+            reason = done_refusal(state, ticket_id)
+            if reason:
+                raise ValueError(reason)
         t = state["tickets"].setdefault(ticket_id, {
             "repo": None, "slice": None, "status": "todo", "blocked_by": [],
             "branch": None, "report": None, "snapshot_published": False,
@@ -239,7 +259,7 @@ def main(argv=None) -> int:
             out = set_slices(a.run, json.loads(a.slices))
         elif a.cmd == "set-ticket":
             fields = dict(_parse_field(kv) for kv in a.field)
-            out = set_ticket(a.run, a.id, **fields)
+            out = set_ticket(a.run, a.id, require_verify=True, **fields)
         elif a.cmd == "set-repo":
             out = set_repo(a.run, a.name, a.path, a.integration_branch)
         elif a.cmd == "record-verify":

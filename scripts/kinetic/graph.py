@@ -34,6 +34,39 @@ def topo_order(tickets: dict) -> list:
     return order
 
 
+def _upstream(tickets: dict, tid: str) -> set:
+    """Every ticket tid is blocked by, directly or transitively."""
+    seen, stack = set(), [tid]
+    while stack:
+        for e in tickets.get(stack.pop(), {}).get("blocked_by", []):
+            if e["id"] in tickets and e["id"] not in seen:
+                seen.add(e["id"])
+                stack.append(e["id"])
+    return seen
+
+
+def interface_issues(tickets: dict) -> dict:
+    """A consumer must be (transitively) blocked by every producer of what it consumes."""
+    producers = {}
+    for i, t in tickets.items():
+        for name in t.get("produces") or []:
+            producers.setdefault(name, set()).add(i)
+    errors, warnings = [], []
+    for i, t in sorted(tickets.items()):
+        up = None
+        for name in t.get("consumes") or []:
+            prod = producers.get(name, set()) - {i}
+            if not prod:
+                if i not in producers.get(name, set()):
+                    warnings.append(f"ticket {i}: consumes '{name}' that no ticket produces "
+                                    f"(fine if it already exists)")
+                continue
+            up = _upstream(tickets, i) if up is None else up
+            for p in sorted(prod - up):
+                errors.append(f"ticket {i}: consumes '{name}' produced by {p} but has no edge to it")
+    return {"errors": errors, "warnings": warnings}
+
+
 def validate(tickets: dict, lane: str, slices: list | None = None) -> list:
     # lane is accepted per the interface; the brief gives it no behaviour.
     errors = []
@@ -54,7 +87,7 @@ def validate(tickets: dict, lane: str, slices: list | None = None) -> list:
         topo_order(tickets)
     except ValueError as e:
         errors.append(str(e))
-    return errors
+    return errors + interface_issues(tickets)["errors"]
 
 
 def main(argv=None) -> int:
@@ -66,7 +99,8 @@ def main(argv=None) -> int:
         s = state.load(a.run)
         if a.cmd == "validate":
             errors = validate(s["tickets"], s["lane"], s.get("slices"))
-            print(json.dumps({"errors": errors}))
+            print(json.dumps({"errors": errors,
+                              "warnings": interface_issues(s["tickets"])["warnings"]}))
             return 1 if errors else 0
         print(json.dumps({"order": topo_order(s["tickets"])}))
     except (ValueError, OSError, KeyError) as e:

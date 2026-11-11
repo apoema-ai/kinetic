@@ -68,7 +68,8 @@ At any point `/kinetic:status` shows where the run is, and `/kinetic:ask` prints
           |      graph validate must be clean ------> GATE: breakdown (records the grant)
           |
        [build] -- frontier -> implementer per ticket (background, own worktree)
-          |      -> spec + standards reviewers -> fix rounds -> merge into integration
+          |      -> DONE only with a passing verify on record
+          |      -> spec + standards reviewers -> scoped fix rounds -> merge into integration
           |      -> pin downstream repos on snapshot edges
           |
       [review] -- architecture and security review per repo, fix tickets
@@ -76,7 +77,7 @@ At any point `/kinetic:status` shows where the run is, and `/kinetic:ask` prints
           |
        [ship] -- merge order, PR bodies, draft PRs (push and PR hooks confirm)
           |
-       [retro] -- retro, runbook.md, release-notes.md
+       [retro] -- retro, runbook.md, release-notes.md, cleanup offer
           |
         [done]
 ```
@@ -158,7 +159,7 @@ Here the tracker is Jira, so ticket ids are Jira keys and the run id is `INV-432
    | INV-4323 | api | INV-4322 (`snapshot`) |
    | INV-4324 | web | INV-4323 (`merge`) |
 
-   The `snapshot` edge is allowed because `statement-client` has `publish_snapshot` and `api` has `pin` in `repos.json`. Without them, the tickets phase would use a `merge` edge. You approve the breakdown and the grant.
+   `INV-4322` produces `StatementClient.export`, which `INV-4323` consumes; `graph validate` would reject the breakdown if `INV-4323` were not blocked by `INV-4322`. The `snapshot` edge is allowed because `statement-client` has `publish_snapshot` and `api` has `pin` in `repos.json`. Without them, the tickets phase would use a `merge` edge. You approve the breakdown and the grant.
 4. **Build.** Each repo gets its own integration branch `kinetic/INV-4321/integration`.
    - Round 1: only `INV-4322` is ready. Its implementer adds the client method. After review it merges into `statement-client`'s integration branch, and `kinetic.gitops pin` publishes the snapshot and pins `api` to it.
    - Round 2: `INV-4323` is ready. Its worktree is cut from `api`'s integration branch, which now carries the pin, so the implementer builds against the new client.
@@ -201,13 +202,18 @@ Tickets block each other with exactly three edge types (in Jira, a "blocks" link
 
 `snapshot` edges need `publish_snapshot` and `pin` configured for the repos involved; without them the tickets phase uses `merge` edges instead.
 
+### Interfaces
+
+Each ticket also lists the interfaces it `produces` and `consumes` (an endpoint, a client method, an event, a schema), with one stable name per interface, such as `StatementClient.export`. `graph validate` treats a ticket that consumes what another ticket produces, without being blocked by it directly or transitively, as an error: it would start before what it needs exists. An interface no ticket produces is a warning shown at the breakdown gate, to confirm it already exists in the code.
+
 ### Rounds
 
 1. `kinetic.frontier` lists the ready tickets: blockers satisfied, at most 3 running at once and at most 1 per repo.
-2. Each ready ticket gets its ticket file (`<run_dir>/issues/<id>.md`), its worktree and status `running`, then all are dispatched in one message as background `implementer` agents. Each implementer follows `tdd`, runs the repo's verify command through `kinetic.verify`, and writes a report with a status: `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_DECISION` or `BLOCKED`.
-3. On `DONE`, the `spec-reviewer` and `standards-reviewer` agents review the ticket's diff against the integration branch. Confirmed findings go back to a fix implementer, at most 3 fix rounds per ticket.
-4. The ticket branch is merged into the integration branch (conflicts use `resolving-merge-conflicts` when available, otherwise you are asked). Downstream repos on a `snapshot` edge are pinned to the new snapshot.
-5. On `NEEDS_DECISION` or `BLOCKED` you are asked, the answer is recorded as a ruling, and the same implementer resumes.
+2. Each ready ticket gets its ticket file (`<run_dir>/issues/<id>.md`), its worktree and status `running`, then all are dispatched in one message as background `implementer` agents. Each implementer follows `tdd` and saves the failing test run as RED evidence, reviews its own diff, runs the repo's verify command through `kinetic.verify` (doing a root-cause pass if it fails), and writes a report with a status: `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `NEEDS_DECISION` or `BLOCKED`.
+3. On `DONE`, the ticket is marked done only if `set-ticket` finds a passing verify for it newer than its last edit; a report is a claim, the verify record is the evidence. Then the `spec-reviewer` (which also checks the RED evidence matches an acceptance criterion) and the `standards-reviewer` review the ticket's diff against the integration branch.
+4. Confirmed findings start **fix rounds**, at most 3: rounds 1 and 2 resume the same implementer (it keeps its context), round 3 is a fresh implementer on opus. After each round the `fix-reviewer` checks only the fix: each finding ADDRESSED or NOT, plus new breakage in the fix. Issues outside the fix are saved for the integration review instead of extending the loop. Findings still open after round 3 are adjudicated: blocking ones go to you, the rest are recorded as rulings.
+5. The ticket branch is merged into the integration branch (conflicts use `resolving-merge-conflicts` when available, otherwise you are asked). Downstream repos on a `snapshot` edge are pinned to the new snapshot.
+6. On `NEEDS_CONTEXT` the orchestrator answers from state, config, the spec or the ticket and resumes the implementer; you are asked only if it cannot. On `NEEDS_DECISION` or `BLOCKED` you are asked, the answer is recorded as a ruling, and the same implementer resumes.
 
 If the frontier is empty while tickets are still `todo` and nothing is running, the run is stalled on edges that will not clear by themselves. kinetic shows each waiting edge and asks whether to change its type, mark a release, or stop; it never dispatches around an edge.
 
@@ -215,7 +221,7 @@ Ticket statuses: `todo`, `running`, `done`, `done_with_concerns`, `needs_decisio
 
 ### Review phase
 
-For each repo, `dev-fleet:architecture-review` and `/security-review` run when available (kinetic says which ran). Confirmed findings become fix tickets named `<repo>-review-N` that go through the same build rounds. Every changed repo is verified again; a failing verify blocks the ship gate.
+The `integration-reviewer` (opus) always runs once for the whole run. It reads every repo's integration branch against its base and looks for what no per-ticket review can see: contracts that disagree across repos, wiring that was never connected, tickets that conflict once merged, acceptance criteria no ticket fully delivered, and changes that are unsafe in the merge order. In addition, for each repo, `dev-fleet:architecture-review` and `/security-review` run when available (kinetic says which ran). Confirmed findings become fix tickets named `<repo>-review-N` that go through the same build rounds. Every changed repo is verified again; a failing verify blocks the ship gate.
 
 ## Ship: what the PRs look like
 
@@ -280,8 +286,10 @@ Bodies are written for developers: no lists of files touched, every design decis
 | `retro` | phase skill | inline | Retro, runbook, release notes |
 | `tdd` | skill | sonnet | Test-first loop the implementer preloads (`skills: [tdd]`) |
 | `implementer` | agent | sonnet | One ticket in its own worktree; tools: Read, Edit, Write, Grep, Glob, Bash |
-| `spec-reviewer` | agent | opus | Read-only: does the diff do what the ticket asks |
+| `spec-reviewer` | agent | opus | Read-only: does the diff do what the ticket asks; is the RED evidence real |
 | `standards-reviewer` | agent | opus | Read-only: does the diff meet the repo's standards |
+| `fix-reviewer` | agent | sonnet | Read-only, scoped: is each finding fixed, did the fix break anything |
+| `integration-reviewer` | agent | opus | Read-only, whole run: cross-repo contracts, wiring, ticket interactions, merge order |
 
 Phase skills run inline in the orchestrator's session, so their `model:` field has no effect; they use whatever model the session runs. Reviewers have no Write tool: they return text and the orchestrator saves it under `<run_dir>/reviews/`.
 
@@ -368,7 +376,9 @@ The run-scoped hooks (isolation, record_edit, completion_gate) act only in the s
 ## Recovery and troubleshooting
 
 - **Resume after a crash or in a new session.** Run `/kinetic:run` again. It finds the active run, rewrites the pointer (which claims the run for the new session), and resumes at the recorded phase. Recorded gates stay approved. For a ticket still `running` with no report, kinetic shows what its worktree holds and asks whether to re-dispatch an implementer there or set it back to `todo`.
-- **A crash during a fix round.** Recovery cannot yet tell a dead fix agent from a finished first round; check `<run_dir>/reports/<id>-fix-N.md` by hand.
+- **A crash during a fix round.** Recovery cannot yet tell a dead fix agent from a finished first round; check the report's latest `## Fix round` section and `<run_dir>/reviews/<id>-fix-N.md` by hand.
+- **`set-ticket` refuses `done`.** The ticket has no passing verify newer than its last edit. Re-run verify in its worktree (`python3 -m kinetic.verify --run <run_dir> --repo-name <repo> --repo-path <worktree> --ticket <id>`) or resume the implementer.
+- **Clean up after merge.** The retro offers to remove ticket and integration worktrees and branches whose PRs merged, listing them and asking first. It never force-removes and never deletes the run directory.
 - **Abandon a run.** `rm -f ~/.config/kinetic/active-run`. The run directory stays for reference.
 - **A hook denied something.** A denial is final for that action. Read the reason: an isolation denial names the allowed roots; a push denial means the target is a protected branch.
 - **`/kinetic:init` is denied writing config.** You are in the session that owns the active run; run it from another session.
@@ -383,7 +393,8 @@ Run scripts directly with `PYTHONPATH=<kinetic>/scripts python3 -m kinetic.<modu
 .claude-plugin/plugin.json   plugin manifest
 skills/<name>/SKILL.md       commands and phase skills; skills/run/guides/ holds the
                              build loop, lanes, gates and recovery guides
-agents/                      implementer, spec-reviewer, standards-reviewer
+agents/                      implementer, spec-reviewer, standards-reviewer,
+                             fix-reviewer, integration-reviewer
 hooks/                       hooks.json and one Python script per hook; _common.py
                              resolves the active run and its session scope
 scripts/kinetic/             the deterministic core
@@ -393,8 +404,8 @@ docs/                        comparison, design spec, implementation plan, rulin
 
 | Module | Responsibility |
 |---|---|
-| `state.py` | Run state: init, phase, slices, tickets, repos, gates, rulings, verify and edit stamps, owner session; flock-guarded atomic writes; CLI |
-| `graph.py` | Validates the ticket graph (missing repo, edge types, unknown blockers, unused slices, cycles) and gives a topological order |
+| `state.py` | Run state: init, phase, slices, tickets, repos, gates, rulings, verify and edit stamps, owner session; flock-guarded atomic writes; CLI (whose `set-ticket` refuses `done` without a passing, current verify) |
+| `graph.py` | Validates the ticket graph (missing repo, edge types, unknown blockers, unused slices, cycles, consumers without an edge to their producer; unproduced interfaces as warnings) and gives a topological order |
 | `frontier.py` | Ready tickets: satisfied blockers, the cap of 3 running, one per repo |
 | `gitops.py` | `worktree`, `merge` (ticket into integration), `merge-order` across repos, `pin` downstream repos to a snapshot |
 | `verify.py` | Runs a repo's verify command, logs it and records the result in state |

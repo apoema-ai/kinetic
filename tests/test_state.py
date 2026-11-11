@@ -212,6 +212,47 @@ class CliTest(unittest.TestCase):
         self.assertEqual(t["blocked_by"], [{"id": "T0", "type": "merge"}])
         self.assertEqual(t["branch"], "123")
 
+    def _ticket_in_repo(self):
+        self.cli("init", "--lane", "epic", "--ref", "E")
+        self.cli("set-ticket", "--id", "T1", "--field", "repo=api")
+
+    def test_cli_refuses_done_without_verify(self):
+        self._ticket_in_repo()
+        r = self.cli("set-ticket", "--id", "T1", "--field", "status=done")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no verify", r.stderr)
+        self.assertEqual(state.load(self.run_dir)["tickets"]["T1"]["status"], "todo")
+
+    def test_cli_refuses_done_on_failing_verify(self):
+        self._ticket_in_repo()
+        state.record_verify(self.run_dir, "T1", 1, "l")
+        r = self.cli("set-ticket", "--id", "T1", "--field", "status=done_with_concerns")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("exit 1", r.stderr)
+
+    def test_cli_refuses_done_when_ticket_edited_after_verify(self):
+        self._ticket_in_repo()
+        state.record_verify(self.run_dir, "T1", 0, "l", at="2026-01-01T00:00:00.000000+00:00")
+        state._mutate(self.run_dir, lambda s: s["repos"].setdefault("api", {}).update(
+            last_edit_at="2026-01-01T00:00:05.000000+00:00", last_edit_ticket="T1"))
+        r = self.cli("set-ticket", "--id", "T1", "--field", "status=done")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("edited after", r.stderr)
+
+    def test_cli_allows_done_after_passing_verify(self):
+        self._ticket_in_repo()
+        state._mutate(self.run_dir, lambda s: s["repos"].setdefault("api", {}).update(
+            last_edit_at="2026-01-01T00:00:00.000000+00:00", last_edit_ticket="T1"))
+        state.record_verify(self.run_dir, "T1", 0, "l", at="2026-01-01T00:00:05.000000+00:00")
+        r = self.cli("set-ticket", "--id", "T1", "--field", "status=done")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(state.load(self.run_dir)["tickets"]["T1"]["status"], "done")
+
+    def test_python_set_ticket_does_not_require_verify(self):
+        self._ticket_in_repo()
+        state.set_ticket(self.run_dir, "T1", status="done")
+        self.assertEqual(state.load(self.run_dir)["tickets"]["T1"]["status"], "done")
+
     def test_set_slices_cli(self):  # R17
         self.cli("init", "--lane", "epic", "--ref", "E")
         r = self.cli("set-slices", "--slices", '["S1","S2"]')

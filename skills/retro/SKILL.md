@@ -37,6 +37,13 @@ Anything you propose to put in `CLAUDE.md`, `AGENTS.md`, a skill or a standards 
 
 Source facts from the spec, ticket reports and PRs, not from memory. Mark anything you could not verify as "unverified" instead of stating it as fact. These are drafts for the user to review.
 
+5. Offer cleanup. Ticket worktrees and branches are kept until now for recovery. For each repo, check its PR state (`gh pr view <url> --json state --jq .state`, from the repo path):
+
+- **PR merged:** offer to remove that repo's ticket worktrees and branches, and its integration worktree. List exactly what would go (`git -C <integration worktree> worktree list`, the `kinetic/<run-id>/*` branches), and ask before removing anything. Remove with `git -C <repo path> worktree remove <path>` and `git -C <repo path> branch -d <branch>`; never `--force` and never `-D` (a refusal means unmerged work: report it and leave it).
+- **PR open or closed unmerged:** keep the integration worktree and branch. Offer to remove only ticket worktrees whose branch is already merged into the integration branch (`git -C <integration worktree> branch --merged kinetic/<run-id>/integration`).
+
+Never remove the run directory; it holds the state, reports, reviews and docs. If the user declines, say the run can be cleaned up later by re-reading this step.
+
 ## Reference
 
 ### Implementation vs Review

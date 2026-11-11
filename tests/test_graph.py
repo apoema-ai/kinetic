@@ -11,6 +11,38 @@ def t(repo="r", slice=None, blocked_by=()):
             "branch": None, "report": None}
 
 
+def io(ticket, produces=(), consumes=()):
+    ticket["produces"], ticket["consumes"] = list(produces), list(consumes)
+    return ticket
+
+
+class InterfaceTest(unittest.TestCase):
+    def test_consumer_without_edge_to_producer_is_error(self):
+        tickets = {"A": io(t(repo="lib"), produces=["Client.export"]),
+                   "B": io(t(repo="api"), consumes=["Client.export"])}
+        res = graph.interface_issues(tickets)
+        self.assertEqual(len(res["errors"]), 1)
+        self.assertIn("B", res["errors"][0])
+        self.assertIn("Client.export", res["errors"][0])
+        self.assertTrue(any("Client.export" in e for e in graph.validate(tickets, "epic")))
+
+    def test_transitive_edge_satisfies_consumer(self):
+        tickets = {"A": io(t(), produces=["X"]),
+                   "B": t(blocked_by=[("A", "merge")]),
+                   "C": io(t(blocked_by=[("B", "merge")]), consumes=["X"])}
+        self.assertEqual(graph.interface_issues(tickets), {"errors": [], "warnings": []})
+
+    def test_unproduced_interface_is_warning_only(self):
+        res = graph.interface_issues({"A": io(t(), consumes=["Legacy.api"])})
+        self.assertEqual(res["errors"], [])
+        self.assertEqual(len(res["warnings"]), 1)
+        self.assertIn("Legacy.api", res["warnings"][0])
+
+    def test_self_produced_and_missing_fields_ignored(self):
+        tickets = {"A": io(t(), produces=["X"], consumes=["X"]), "B": t()}
+        self.assertEqual(graph.interface_issues(tickets), {"errors": [], "warnings": []})
+
+
 class GraphTest(unittest.TestCase):
     def test_cycle_detected(self):
         tickets = {"A": t(blocked_by=[("B", "merge")]), "B": t(blocked_by=[("A", "merge")])}

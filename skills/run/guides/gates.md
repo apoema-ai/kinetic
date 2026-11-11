@@ -14,7 +14,7 @@ Show the spec location (Jira key or `<run_dir>/spec.md`) and a three-line summar
 
 ## Breakdown gate (after tickets; records the grant)
 
-Before asking, `python3 -m kinetic.graph validate --run <run_dir>` must print empty `errors`. Show the ticket list: id, repo, blocked-by with edge types.
+Before asking, `python3 -m kinetic.graph validate --run <run_dir>` must print empty `errors`. Show the ticket list: id, repo, blocked-by with edge types, and interfaces (produces / consumes). Show every `warnings` entry under the list (an interface no ticket produces) so the user can confirm it already exists.
 
 The question must spell out the grant in substance:
 
