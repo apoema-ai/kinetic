@@ -72,6 +72,7 @@ Entries are what / why / cost. R34-R41 are the designer's calls from `docs/specs
 - R53: hook-confirmation claims are worded as Atlassian MCP and Bash only; Linear and other MCP writes are covered only by the grant. Why: `hooks.json` matches only those. Cost: none (hooks unchanged).
 - R54: Task 9 step 3 (the plugin validator skill) is run by the controller after the implementer. Why: the validator is a skill that may dispatch agents and implementers never dispatch subagents. Cost: none.
 - R55: this section also records the controller rulings from the SDD ledger, not only the spec's eight designer's calls, because they are decisions made on the user's behalf. Cost: a longer rulings file.
+- R56: no requirements.txt added for pyyaml; the only import is tests/test_skill_text.py behind a skip guard and runtime scripts stay stdlib-only per the global constraint. Cost if wrong: the frontmatter test silently skips on machines without pyyaml.
 
 ### Left for later (0.3.0)
 - The tracker adapters (`trackers/*.md`) are untested live against Jira, GitHub and Linear, including whether the installed `gh` supports sub-issues and "blocked by", and which relation tools the Linear MCP exposes.

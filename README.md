@@ -187,7 +187,7 @@ Three gates, each asked with a multiple-choice question and recorded in state (`
 | `breakdown` | After tickets | Every ticket with its repo and blockers by edge type. Approving records the **grant**. |
 | `ship` | After review | Per repo: integration branch, base branch, merge order, latest verify result. |
 
-The grant is what the build agents may do without asking again: commit and push to ticket branches, make Jira transitions, open draft PRs. It never covers pushes to `main`, `master` or `Release*`, force-push after review, deploys, or production data writes. Pushes, PR creation and Jira writes are still confirmed by hooks, and a hook denial is final.
+The grant is what the build agents may do without asking again: commit and push to ticket branches, make Jira transitions, open draft PRs. It never covers pushes to `main`, `master` or `Release*`, force-push after review, deploys, or production data writes. Pushes and PR creation are still confirmed by hooks, and a hook denial is final. Tracker writes are hook-confirmed only for the Atlassian MCP and Bash; other trackers' writes are covered only by the grant.
 
 ## The build loop
 
@@ -258,7 +258,7 @@ Merge in this order: api, web
 - **Unverified / gaps:** <...>
 
 ### Manual steps:
-- [ ] <open human tickets this PR needs, with the tracker key>
+- <ref> - <title> (done by human: <note>)
 
 ### Ships with:
 <PRs in other repos that must merge and deploy together>
@@ -314,9 +314,9 @@ Besides `blocked_by` (with the `snapshot`, `merge` and `release` edge types), ti
 
 | Field | Meaning | Effect |
 |---|---|---|
-| `after` | Prefer to build this after another ticket | Breaks ties in build order only; never blocks, and a soft cycle is ignored |
+| `after` | Prefer to build this after another ticket | Breaks ties in build order only; never blocks; a soft cycle never blocks either and is reported by `graph validate` as a warning only |
 | `ships_with` | A group name shared by tickets that must be released together | Merge order puts the group's repos next to each other when blockers allow; PR bodies get a "Ships with" section |
-| `related` | Context only | Listed in the ticket and PR |
+| `related` | Context only | Listed in the ticket; a related human ticket also appears in the PR's Manual steps |
 
 `graph validate` reports unknown `after` or `related` ids, an `after` that contradicts a `blocked_by`, and a `ships_with` group of one ticket. `python3 -m kinetic.gitops ships-with --run <run_dir>` prints the groups by repo. Tickets written by 0.2.0 need no migration: missing fields default to `kind` agent and empty relationships.
 
@@ -402,14 +402,12 @@ A repo-root `.kinetic.json` with the same keys overrides the central entry key b
 ```json
 {
   "tracker": "jira",
-  "jira_project": "INV",
-  "slice_issue_type": "Story",
-  "child_issue_type": "Sub-task",
+  "tracker_settings": { "jira_project": "INV", "slice_issue_type": "Story", "child_issue_type": "Sub-task" },
   "workspace_root": "~/workspace/kinetic-runs"
 }
 ```
 
-With `"tracker": "local"` (or no `tracker` key) tickets are files under `<run_dir>/issues/`. See [Trackers](#trackers) for the other trackers, `tracker_settings` and `tracker_names`, and [The PR template override](#the-pr-template-override) for `pr_template`.
+The 0.2.0 top-level `jira_project`, `slice_issue_type` and `child_issue_type` keys are still read. With `"tracker": "local"` (or no `tracker` key) tickets are files under `<run_dir>/issues/`. See [Trackers](#trackers) for the other trackers, `tracker_settings` and `tracker_names`, and [The PR template override](#the-pr-template-override) for `pr_template`.
 
 ## Where state lives
 
