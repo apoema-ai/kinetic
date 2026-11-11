@@ -152,6 +152,25 @@ class StateTest(unittest.TestCase):
         state.record_edit(self.run_dir, str(Path(self._tmp.name) / "other.py"))
         self.assertIsNotNone(state.load(self.run_dir)["last_edit_at"])
 
+    def test_record_edit_routes_ticket_worktree_to_repo(self):  # R24
+        state.init(self.run_dir, "epic", "E-1")
+        wt = Path(self._tmp.name) / "run" / "worktrees" / "api-T1"
+        wt.mkdir(parents=True)
+        state.set_repo(self.run_dir, "api", str(Path(self._tmp.name) / "api"), "int")
+        state.set_ticket(self.run_dir, "T1", repo="api", worktree=str(wt))
+        state.record_edit(self.run_dir, str(wt / "a.py"))
+        s = state.load(self.run_dir)
+        self.assertIsNotNone(s["repos"]["api"]["last_edit_at"])
+        self.assertIsNone(s["last_edit_at"])
+
+    def test_record_edit_ticket_worktree_without_repo_falls_back(self):  # R24
+        state.init(self.run_dir, "epic", "E-1")
+        wt = Path(self._tmp.name) / "wt"
+        wt.mkdir()
+        state.set_ticket(self.run_dir, "T1", worktree=str(wt))
+        state.record_edit(self.run_dir, str(wt / "a.py"))
+        self.assertIsNotNone(state.load(self.run_dir)["last_edit_at"])
+
     def test_init_refuses_existing_unless_force(self):
         state.init(self.run_dir, "quick", "Q-1")
         with self.assertRaises(FileExistsError):

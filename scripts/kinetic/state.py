@@ -140,6 +140,13 @@ def record_edit(run_dir, path: str) -> None:
             if real == rp or real.startswith(rp + os.sep):
                 repo["last_edit_at"] = _now()
                 return
+        for t in state["tickets"].values():
+            wt = t.get("worktree")
+            if wt and t.get("repo"):
+                rp = os.path.realpath(wt)
+                if real == rp or real.startswith(rp + os.sep):
+                    state["repos"].setdefault(t["repo"], {})["last_edit_at"] = _now()
+                    return
         state["last_edit_at"] = _now()
 
     _mutate(run_dir, fn)

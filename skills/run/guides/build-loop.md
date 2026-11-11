@@ -9,7 +9,7 @@ You stay thin: never read code or full diffs. Read only script JSON, the first l
 3. For each repo in play, find its base branch (`base_branch` in repo config, default `main`) and register it with the worktree as its path and integration branch `kinetic/<run-id>`:
    - Create the worktree with the `checkout-ticket-repos` skill if available (branch `kinetic/<run-id>` off the base). If it is not available: `python3 -m kinetic.gitops worktree --repo <repo-path> --dest <workspace>/<run-id>/worktrees/<repo> --branch kinetic/<run-id> --base <base>`.
    - `python3 -m kinetic.state set-repo --run <run_dir> --name <repo> --path <worktree> --integration-branch kinetic/<run-id>`
-4. Make `<run_dir>/reports` and `<run_dir>/reviews` exist. Ticket branches are created per ticket from the repo's integration branch: `python3 -m kinetic.gitops worktree --repo <repo-worktree> --dest <run_dir>/worktrees/<repo>-<id> --branch kinetic/<run-id>/<id> --base kinetic/<run-id>` and the ticket's worktree is where its implementer works; record it with `set-ticket --id <id> --field branch=kinetic/<run-id>/<id>`.
+4. Make `<run_dir>/reports` and `<run_dir>/reviews` exist. Ticket branches are created per ticket from the repo's integration branch: `python3 -m kinetic.gitops worktree --repo <repo-worktree> --dest <run_dir>/worktrees/<repo>-<id> --branch kinetic/<run-id>/<id> --base kinetic/<run-id>` and the ticket's worktree is where its implementer works; record it with `set-ticket --id <id> --field branch=kinetic/<run-id>/<id>` and `set-ticket --id <id> --field worktree=<run_dir>/worktrees/<repo>-<id>`.
 
 ## Each round
 
