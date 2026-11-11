@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import heapq
 import json
 import os
 import subprocess
@@ -42,8 +41,23 @@ def merge_ticket(repo_path, ticket_branch: str, integration_branch: str) -> dict
     return {"merged": False, "conflicts": conflicts}
 
 
+def _groups(tickets: dict) -> dict:
+    out = {}
+    for t in tickets.values():
+        g = state.field(t, "ships_with")
+        if g and t.get("repo"):
+            out.setdefault(g, set()).add(t["repo"])
+    return out
+
+
+def ships_with_groups(st: dict) -> dict:
+    """Ships-with group -> sorted repos of its tickets (repo-less tickets skipped)."""
+    return {g: sorted(r) for g, r in _groups(st["tickets"]).items()}
+
+
 def merge_order(st: dict) -> list:
-    """Repos ordered so a repo follows every repo it has a merge/release blocker in."""
+    """Repos ordered so a repo follows every repo it has a merge/release blocker in.
+    Among ready repos, one sharing a ships_with group with the last pick goes first."""
     tickets = st["tickets"]
     repos = {t["repo"] for t in tickets.values() if t.get("repo")}
     before = {r: set() for r in repos}  # repo -> repos that must come first
@@ -54,17 +68,15 @@ def merge_order(st: dict) -> list:
             b = tickets.get(e["id"])
             if e["type"] in ("merge", "release") and b and b.get("repo") and b["repo"] != t["repo"]:
                 before[t["repo"]].add(b["repo"])
-    ready = [r for r, d in before.items() if not d]
-    heapq.heapify(ready)
+    groups = list(_groups(tickets).values())
     order = []
-    while ready:
-        r = heapq.heappop(ready)
-        order.append(r)
-        for n, d in before.items():
-            if r in d:
-                d.discard(r)
-                if not d:
-                    heapq.heappush(ready, n)
+    while True:
+        ready = sorted(r for r in before if r not in order and not (before[r] - set(order)))
+        if not ready:
+            break
+        last = order[-1] if order else None
+        near = [r for r in ready if any(last in g and r in g for g in groups)]
+        order.append((near or ready)[0])
     if len(order) != len(repos):
         raise ValueError("dependency cycle among repos: " + ", ".join(sorted(repos - set(order))))
     return order

@@ -25,6 +25,7 @@ class DoctorTest(unittest.TestCase):
         self.home = self.tmp / "home"
         self.home.mkdir()
         self.central = self.tmp / "repos.json"
+        self.settings = self.tmp / "settings.json"
         self.repo = self.tmp / "svc"
         self.repo.mkdir()
         (self.repo / ".kinetic.json").write_text(json.dumps({"verify": "true"}))
@@ -49,8 +50,11 @@ class DoctorTest(unittest.TestCase):
 
     def _by_name(self, repos=None):
         res = doctor.checks(repos if repos is not None else [("svc", str(self.repo))],
-                            self.home, self.central)
+                            self.home, self.central, settings=self.settings)
         return {c["name"]: c for c in res}
+
+    def _write_settings(self, **cfg):
+        self.settings.write_text(json.dumps(cfg))
 
     def test_missing_gh_fails(self):
         (self.bin / "gh").unlink()
@@ -143,10 +147,48 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(json.loads(out.getvalue())["ok"])
 
-    def test_atlassian_always_warns(self):
+    def test_atlassian_warns_only_for_jira(self):
+        self._write_settings(tracker="jira", jira_project="P", slice_issue_type="S",
+                             child_issue_type="C")
         c = self._by_name()
         self.assertEqual(c["atlassian-mcp"]["status"], "warn")
         self.assertEqual(c["atlassian-mcp"]["fix"], "check with /mcp")
+        self.assertEqual(c["tracker-access"]["status"], "warn")
+        self.assertEqual(c["tracker-access"]["fix"], "check the MCP with /mcp")
+        self._write_settings(tracker="local")
+        self.assertNotIn("atlassian-mcp", self._by_name())
+
+    def test_doctor_tracker_fail_on_unknown(self):
+        self._write_settings(tracker="nope")
+        c = self._by_name()
+        self.assertEqual(c["tracker"]["status"], "fail")
+        self.assertIn("unknown tracker", c["tracker"]["fix"])
+        self.assertEqual(c["tracker-access"]["status"], "fail")
+        self.assertEqual(c["tracker-access"]["fix"], "fix tracker settings first")
+
+    def test_tracker_default_local_passes(self):
+        c = self._by_name()
+        self.assertEqual(c["tracker"]["status"], "pass")
+        self.assertEqual(c["tracker-access"]["status"], "pass")
+        self.assertEqual(c["pr-template"]["status"], "pass")
+
+    def test_tracker_access_github_reuses_gh_auth(self):
+        self._write_settings(tracker="github", tracker_settings={"github_repo": "o/r"})
+        self.assertEqual(self._by_name()["tracker-access"]["status"], "pass")
+        self._stub("gh", 1)
+        c = self._by_name()
+        self.assertEqual(c["tracker-access"]["status"], "fail")
+        self.assertEqual(c["tracker-access"]["fix"], c["gh-auth"]["fix"])
+        (self.bin / "gh").unlink()
+        c = self._by_name()
+        self.assertEqual(c["tracker-access"]["status"], "fail")
+        self.assertEqual(c["tracker-access"]["fix"], "run: gh auth login")
+
+    def test_doctor_pr_template_missing(self):
+        self._write_settings(pr_template="nope.md")
+        c = self._by_name()
+        self.assertEqual(c["pr-template"]["status"], "fail")
+        self.assertIn(str(self.tmp / "nope.md"), c["pr-template"]["fix"])
 
     def test_cli_exit_code_and_output(self):
         (self.repo / ".kinetic.json").unlink()

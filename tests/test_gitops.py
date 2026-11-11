@@ -116,6 +116,26 @@ class MergeOrderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gitops.merge_order({"tickets": tickets})
 
+    def test_merge_order_ships_with_adjacent(self):
+        tickets = {
+            "A": {"repo": "a", "blocked_by": [], "ships_with": "g"},
+            "B": {"repo": "b", "blocked_by": []},
+            "Z": {"repo": "z", "blocked_by": [], "ships_with": "g"},
+        }
+        self.assertEqual(gitops.merge_order({"tickets": tickets}), ["a", "z", "b"])
+
+    def test_ships_with_groups(self):
+        tickets = {
+            "A": {"repo": "z", "blocked_by": [], "ships_with": "g"},
+            "B": {"repo": "a", "blocked_by": [], "ships_with": "g"},
+            "C": {"repo": "a", "blocked_by": [], "ships_with": "g"},
+            "D": {"repo": "q", "blocked_by": [], "ships_with": "solo"},
+            "H": {"repo": None, "blocked_by": [], "ships_with": "g"},
+            "N": {"repo": "n", "blocked_by": []},
+        }
+        self.assertEqual(gitops.ships_with_groups({"tickets": tickets}),
+                         {"g": ["a", "z"], "solo": ["q"]})
+
 
 class PinTests(unittest.TestCase):
     def setUp(self):
