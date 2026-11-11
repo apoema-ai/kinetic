@@ -26,6 +26,6 @@ Options: approve (record the grant), revise tickets. In the quick lane this is t
 
 Show per repo: integration branch, base branch, merge order (`python3 -m kinetic.gitops merge-order --run <run_dir>`), and the latest verify result per repo from state. Ask: "Push the integration branches and open draft PRs?" Options: approve, hold.
 
-On approve, record the gate then read and follow `skills/ship/SKILL.md`. Push and PR creation, Atlassian MCP writes and Bash commands such as `gh` are additionally confirmed by hooks (other MCP tracker writes, for example Linear, are covered only by the grant); a hook denial is final: report it to the user, do not retry another way. Deploy is a separate hook-confirmed step and is never covered by any gate.
+On approve, record the gate then read and follow `skills/ship/SKILL.md`. Hooks confirm differently: git pushes and `gh pr` writes are hook-confirmed (as are Atlassian MCP writes); `gh issue`, `gh label` and `gh api` tracker writes, and other MCP tracker writes such as Linear, are covered only by the grant; a hook denial is final: report it to the user, do not retry another way. Deploy is a separate hook-confirmed step and is never covered by any gate.
 
 The run counts as shipped when `gates["ship"]["approved"]` true and phase `ship`; retro follows.

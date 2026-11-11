@@ -78,7 +78,7 @@ Local ticket template:
 - [ ] Acceptance criterion 2
 ```
 
-The template carries no Status, Type, Repo, Slice, Blocked by, After, Ships with, Related or Assignee lines: `board header` inserts those owned lines from state, whose values you pass with `set-ticket` (step 5). Do not hand-write them. A human ticket's body is a checklist of the manual steps (`- [ ] step`) and the expected outcome of each, with no Interfaces section. Remote issue bodies use the same content (Parent, What to build, Interfaces, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
+The template carries no Status, Type, Repo, Slice, Blocked by, After, Ships with, Related or Assignee lines: `board header` inserts those owned lines from state, whose values you pass with `set-ticket` (step 5). Do not hand-write them. A human ticket's body is a checklist of the manual steps (`- [ ] step`) and the expected outcome of each, with no Interfaces section. A human ticket with no checklist of manual steps (or acceptance criteria) is an error: fix it before the breakdown gate. Remote issue bodies use the same content (Parent, What to build, Interfaces, Acceptance criteria). Avoid file paths and code snippets; they go stale. Exception: inline a prototype's decision-rich snippet (state machine, schema, type shape) and say it came from a prototype.
 
 ### 5. Record in state
 

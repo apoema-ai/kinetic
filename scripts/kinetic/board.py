@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from kinetic import frontier, graph, state
@@ -67,13 +69,21 @@ def _read(p: Path):
         return None
 
 
+def _read_strict(p: Path):
+    """Strict UTF-8: the ticket body is the only copy, so never rewrite what cannot be decoded."""
+    try:
+        return p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+
+
 def write_header(run_dir, ticket_id: str) -> Path:
     t = state.load(run_dir)["tickets"].get(ticket_id)
     if t is None:
         raise KeyError(f"unknown ticket id: {ticket_id}")
     p = _path(run_dir, ticket_id)
     new = dict(zip(HEADER_KEYS, header_lines(t)))
-    text = _read(p)
+    text = _read_strict(p)
     if text is None:
         lines = [f"# {ticket_id}"]
     else:
@@ -105,7 +115,15 @@ def write_header(run_dir, ticket_id: str) -> Path:
     elif tail and tail[0].strip() and not _BOLD.match(tail[0]) and not region:
         tail = [""] + tail  # keep inserted header apart from body text
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("\n".join(lines[:start] + missing + region + tail), encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines[:start] + missing + region + tail))
+        os.replace(tmp, p)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
     return p
 
 
@@ -155,6 +173,9 @@ def drift(run_dir) -> list[dict]:
         text = _read(_path(run_dir, i))
         have = parse_header(text) if text is not None else {}
         for k in _DRIFT_KEYS:
+            # a key absent from an existing file (0.2.0 or hand-written) is not drift
+            if text is not None and k not in have:
+                continue
             if have.get(k) != want[k]:
                 out.append({"id": i, "key": k, "file": have.get(k), "state": want[k]})
     return out

@@ -38,7 +38,7 @@ It prints the ordered repo list, upstream first (and errors on a dependency cycl
    - The lookup fails: an unknown answer is not "no PR". Show the error and ask whether to retry or skip the repo.
    - None: the repo needs a PR.
 
-Title: read it from the template's first-line comment `<!-- title: <<TITLE_KEY>>: <title> -->`, with `<<TITLE_KEY>>` from the tracker adapter's "ticket reference" operation (the slice reference, else the run id) and `<title>` the spec's (or the quick-lane ticket's) title. Strip that comment line from the body before posting.
+Title: read it from the template's first-line comment `<!-- title: <<TITLE_KEY>>: <title> -->`, with `<<TITLE_KEY>>` from the tracker adapter's "ticket reference" operation (the slice reference, else the run id) and `<title>` the spec's (or the quick-lane ticket's) title. Strip that comment line from the body before posting. When the template has no `<!-- title: ... -->` first line, use `<<TITLE_KEY>>: <title>` as the title.
 
 ### 2. Write the bodies
 
@@ -50,7 +50,7 @@ git -C <repo_path> diff origin/<base_branch>..<integration-branch> --stat
 git -C <repo_path> diff origin/<base_branch>..<integration-branch>
 ```
 
-Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (see "PR body template") to `<dir>/pr/<repo>.md` and save a copy as `<dir>/pr/<repo>.placeholders.md`, with the `<<RELATED_PRS>>`, `<<DEPENDS_ON>>` and `<<SHIPS_WITH>>` placeholders left in place (PR numbers do not exist yet; the WARNING alert's "Merge together with" line is left out until step 3).
+Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (see "PR body template") as a draft with the `<<RELATED_PRS>>`, `<<DEPENDS_ON>>` and `<<SHIPS_WITH>>` placeholders left in place (PR numbers do not exist yet; the WARNING alert's "Merge together with" line is left out until step 3). After the review loop below, save the reviewed text to both `<dir>/pr/<repo>.md` and `<dir>/pr/<repo>.placeholders.md`.
 
 **Review loop before saving.** Re-read the draft as a teammate who has seen neither the diff nor the tickets, fix what fails, and re-read, up to 3 rounds:
 

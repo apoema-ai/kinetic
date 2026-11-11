@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from kinetic.tracker import ROLES, ROOT, TRACKERS, TrackerError, adapter_defaults, pr_template, resolve
 
@@ -91,6 +93,18 @@ class TrackerTest(unittest.TestCase):
         p.write_text("no json here")
         with self.assertRaises(TrackerError):
             adapter_defaults(p)
+
+    def test_adapter_defaults_missing_file_raises_tracker_error(self):
+        with self.assertRaises(TrackerError):
+            adapter_defaults(self.tmp / "nope.md")
+
+    def test_pr_template_expands_tilde(self):
+        home = self.tmp / "home"
+        home.mkdir()
+        (home / "t.md").write_text("x")
+        s = self._settings({"pr_template": "~/t.md"})
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            self.assertEqual(pr_template(None, settings=s), str(home / "t.md"))
 
     def test_pr_template_default(self):
         self.assertTrue(pr_template(None, settings=self.tmp / "missing.json").endswith("templates/pr-body.md"))

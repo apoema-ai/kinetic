@@ -113,9 +113,44 @@ class BoardTest(unittest.TestCase):
         p.write_text(p.read_text().replace("**Assignee:** agent", "**Assignee:** bob")
                      .replace("**Related:** None\n", ""))
         d = board.drift(run)
-        keys = {(x["id"], x["key"], x["file"]) for x in d if x["id"] == "01-lib-x-a"}
-        self.assertEqual(keys, {("01-lib-x-a", "Related", None)})
+        # a key absent from the file is not drift; only a missing file reports everything
+        self.assertEqual([x for x in d if x["id"] == "01-lib-x-a"], [])
         self.assertEqual(len([x for x in d if x["id"] == "02-gone"]), len(board.HEADER_KEYS) - 1)
+
+    def test_drift_on_020_shaped_file_only_flags_present_keys(self):
+        run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x", "slice": "01-s",
+                                           "blocked_by": [{"id": "02-svc-y", "type": "merge"}]},
+                            "02-svc-y": {"repo": "svc-y"}})
+        (run / "issues" / "01-lib-x-a.md").write_text(
+            "# Title\n\n**Slice:** 01-s\n**Repo:** other-repo\n\n**What to build:** x\n\n"
+            "**Blocked by:** `01` (merge)\n\n**Interfaces:** none\n\n- [ ] ok\n")
+        d = [x for x in board.drift(run) if x["id"] == "01-lib-x-a"]
+        # only the contiguous bold header block is read; absent keys are not drift
+        self.assertEqual({(x["key"], x["file"]) for x in d}, {("Repo", "other-repo")})
+
+    def test_write_header_refuses_non_utf8_and_leaves_file(self):
+        run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x"}})
+        p = run / "issues" / "01-lib-x-a.md"
+        raw = b"# T\n\nbody " + bytes([0xFF, 0xFE]) + b" text\n"
+        p.write_bytes(raw)
+        with self.assertRaises(UnicodeDecodeError):
+            board.write_header(run, "01-lib-x-a")
+        self.assertEqual(p.read_bytes(), raw)
+        rc, out, _ = cli("header", "--run", str(run), "--id", "01-lib-x-a")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertEqual(p.read_bytes(), raw)
+
+    def test_write_header_does_not_treat_other_oserror_as_missing(self):
+        run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x"}})
+        (run / "issues" / "01-lib-x-a.md").mkdir()  # a directory: read raises IsADirectoryError
+        with self.assertRaises(OSError):
+            board.write_header(run, "01-lib-x-a")
+
+    def test_write_header_leaves_no_temp_files(self):
+        run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x"}})
+        board.write_header(run, "01-lib-x-a")
+        board.write_header(run, "01-lib-x-a")
+        self.assertEqual([p.name for p in (run / "issues").iterdir()], ["01-lib-x-a.md"])
 
     def test_cli(self):
         run = mk(self.tmp, {"01-lib-x-a": {"repo": "lib-x"}})

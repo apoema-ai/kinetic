@@ -31,6 +31,7 @@ class StatusTest(unittest.TestCase):
         self.assertIn("feature", out.splitlines()[0])
         self.assertIn("build", out.splitlines()[0])
         self.assertIn("| id | kind | repo | status | blocked by |", out)
+        self.assertLess(out.index("Waiting on you:"), out.index("| id | kind"))
         self.assertIn("| A-1 | agent | api | done | — |", out)
         self.assertIn("| B-2 | agent | web | todo | A-1 (merge), C (snapshot) |", out)
 

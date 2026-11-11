@@ -52,12 +52,12 @@ Set each with `python3 -m kinetic.state set-phase --run <run_dir> --phase <phase
 | ship | Read and follow `skills/ship/SKILL.md`, run the ship gate (`gates.md`) first. Offer `dev-fleet:release` only if the user asks and the repo is k8s-hosted. |
 | retro | Read and follow `skills/retro/SKILL.md`. Then `set-phase done` and `rm -f ~/.config/kinetic/active-run`. |
 
-A rejected gate returns to the previous phase skill, never forward. Push, PR, deploy, Atlassian MCP writes and Bash commands such as `gh` are additionally confirmed by hooks; other MCP tracker writes (for example Linear) are covered only by the grant. Never try to work around a hook decision.
+A rejected gate returns to the previous phase skill, never forward. Deploy is hook-confirmed; git pushes and `gh pr` writes are hook-confirmed (as are Atlassian MCP writes); `gh issue`, `gh label` and `gh api` tracker writes, and other MCP tracker writes such as Linear, are covered only by the grant. Never try to work around a hook decision.
 
 ## Rules
 
 - At most 3 implementers at once, at most 1 running per repo; `kinetic.frontier` enforces both.
-- Human tickets are never dispatched: each round print `waiting_on_you`, and stop when `only_human_left` (see `build-loop.md`).
+- Human tickets are never dispatched: each round print `waiting_on_you`, and stop when `only_human_left` while agent tickets remain un-merged (see `build-loop.md`); once every agent ticket is merged the loop ends and open human tickets go on to review and ship.
 - Never dispatch an agent from inside an agent; you are the only dispatcher.
 - A reused skill that is missing: use the fallback named in the guide, or ask the user. Never fail silently.
 - Record every user decision that changes scope with `python3 -m kinetic.state add-ruling --run <run_dir> --what ... --why ... --cost ...`.

@@ -42,7 +42,11 @@ def _get(d: dict, dotted: str):
 
 
 def adapter_defaults(path: Path) -> dict:
-    m = _BLOCK.search(Path(path).read_text())
+    try:
+        text = Path(path).read_text()
+    except OSError as e:
+        raise TrackerError(f"cannot read adapter {path}: {e}")
+    m = _BLOCK.search(text)
     if not m:
         raise TrackerError(f"no json block in adapter {path}")
     try:
@@ -115,7 +119,7 @@ def pr_template(repo_path: Path | None, settings: Path = DEFAULT_SETTINGS,
     for cfg_file, cfg in sources:
         value = cfg.get("pr_template")
         if value:
-            p = Path(value)
+            p = Path(value).expanduser()
             if not p.is_absolute():
                 p = cfg_file.parent / p
             if not p.is_file():
