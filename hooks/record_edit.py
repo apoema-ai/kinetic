@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import _common
-from kinetic import state
 
 
 def main(inp):
     found = _common.active_run()
-    path = (inp.get("tool_input") or {}).get("file_path")
+    ti = inp.get("tool_input") or {}
+    path = ti.get("file_path") or ti.get("notebook_path")
     if found and path:
-        state.record_edit(found[0], path)
+        _common.state.record_edit(found[0], _common.abs_path(path, inp.get("cwd")))
 
 
 if __name__ == "__main__":

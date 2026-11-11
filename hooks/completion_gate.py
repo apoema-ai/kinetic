@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 
 import _common
 
@@ -29,7 +30,7 @@ def main(inp):
                             for t in st.get("tickets", {}).values()):
             continue
         if _stale(stamp, _newest([v for v in verifies if v.get("repo") == name])):
-            bad.append((name, repo["path"]))
+            bad.append((name, repo.get("path")))
     top = st.get("last_edit_at")
     if top and _stale(top, _newest(verifies)):
         bad.append(("(outside registered repos)", None))
@@ -39,8 +40,9 @@ def main(inp):
     lines = []
     for name, path in bad:
         if path:
-            lines.append(f"{name}: PYTHONPATH={root}/scripts python3 -m kinetic.verify "
-                         f"--run {run_dir} --repo-name {name} --repo-path {path}")
+            lines.append(f"{name}: PYTHONPATH={shlex.quote(root + '/scripts')} python3 -m kinetic.verify "
+                         f"--run {shlex.quote(str(run_dir))} --repo-name {shlex.quote(name)} "
+                         f"--repo-path {shlex.quote(path)}")
         else:
             lines.append(f"{name}: run verify for the repo you edited")
     print(json.dumps({"decision": "block", "reason":

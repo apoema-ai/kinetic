@@ -7,7 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from kinetic import state  # noqa: E402
+try:
+    from kinetic import state
+except ImportError:  # PreToolUse hooks fail closed via run(); others stay silent
+    state = None
 
 
 def read_input() -> dict:
@@ -19,14 +22,24 @@ def read_input() -> dict:
 
 
 def active_run():
-    """Return (run_dir, state) for the active run, or None."""
+    """Return (run_dir, state) for the active run, or None.
+
+    None only when there is no pointer or no state.json; a state.json that exists but cannot be
+    loaded raises so fail-closed hooks can ask.
+    """
     try:
         run_dir = (Path.home() / ".config" / "kinetic" / "active-run").read_text().strip()
-        if not run_dir or not os.path.isfile(os.path.join(run_dir, "state.json")):
-            return None
-        return run_dir, state.load(run_dir)
-    except (OSError, ValueError):
+    except OSError:
         return None
+    if not run_dir or not os.path.isfile(os.path.join(run_dir, "state.json")):
+        return None
+    if state is None:
+        raise ImportError("kinetic package not importable")
+    return run_dir, state.load(run_dir)
+
+
+def abs_path(path: str, cwd) -> str:
+    return path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path)
 
 
 def pre_tool(decision: str, reason: str) -> None:

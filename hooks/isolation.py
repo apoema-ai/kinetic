@@ -12,9 +12,7 @@ def main(inp):
     if not found or not path:
         return
     run_dir, st = found
-    if not os.path.isabs(path):
-        path = os.path.join(inp.get("cwd") or os.getcwd(), path)
-    real = os.path.realpath(path)
+    real = os.path.realpath(_common.abs_path(path, inp.get("cwd")))
     roots = [os.path.realpath(r["path"]) for r in st.get("repos", {}).values()]
     roots.append(os.path.realpath(run_dir))
     if any(real == r or real.startswith(r + os.sep) for r in roots):

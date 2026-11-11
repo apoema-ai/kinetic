@@ -147,6 +147,9 @@ def record_edit(run_dir, path: str) -> None:
                 if real == rp or real.startswith(rp + os.sep):
                     state["repos"].setdefault(t["repo"], {})["last_edit_at"] = _now()
                     return
+        rd = os.path.realpath(run_dir)
+        if real == rd or real.startswith(rd + os.sep):
+            return  # R25: run-dir artifacts are not code
         state["last_edit_at"] = _now()
 
     _mutate(run_dir, fn)

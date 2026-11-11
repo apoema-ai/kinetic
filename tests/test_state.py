@@ -171,6 +171,13 @@ class StateTest(unittest.TestCase):
         state.record_edit(self.run_dir, str(wt / "a.py"))
         self.assertIsNotNone(state.load(self.run_dir)["last_edit_at"])
 
+    def test_record_edit_ignores_run_dir_artifacts(self):  # R25
+        state.init(self.run_dir, "epic", "E-1")
+        (Path(self.run_dir) / "reports").mkdir()
+        state.record_edit(self.run_dir, str(Path(self.run_dir) / "reports" / "T1.md"))
+        state.record_edit(self.run_dir, str(Path(self.run_dir) / "spec.md"))
+        self.assertIsNone(state.load(self.run_dir)["last_edit_at"])
+
     def test_init_refuses_existing_unless_force(self):
         state.init(self.run_dir, "quick", "Q-1")
         with self.assertRaises(FileExistsError):

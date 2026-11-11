@@ -90,6 +90,33 @@ class StopGate(HookCase):
         self.stamp(top_edit=T3)
         self.assertEqual(self.hook("completion_gate", {})["decision"], "block")
 
+    def test_stop_other_repos_verify_does_not_satisfy(self):
+        self.activate()
+        state.set_repo(self.run_dir, "web", str(self.repo) + "-web", "main")
+        self.stamp(repo_edit=T1, verifies={"repo:web": {"exit_code": 0, "log_path": "l", "at": T3, "repo": "web"}})
+        out = self.hook("completion_gate", {})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("--repo-name api", out["reason"])
+
+    def test_stop_skips_needs_decision_and_blocked(self):
+        self.activate()
+        self.stamp(repo_edit=T3)
+        for status in ("needs_decision", "blocked"):
+            state.set_ticket(self.run_dir, "T-1", repo="api", status=status)
+            self.assertIsNone(self.hook("completion_gate", {}), status)
+
+    def test_stop_handles_repo_without_path(self):
+        self.activate()
+        state._mutate(self.run_dir, lambda s: s["repos"].__setitem__("ghost", {"last_edit_at": T3}))
+        out = self.hook("completion_gate", {})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("ghost", out["reason"])
+
+    def test_stop_ignores_run_dir_artifact_edit(self):
+        self.activate()
+        self.hook("record_edit", {"tool_input": {"file_path": str(self.run_dir / "spec.md")}})
+        self.assertIsNone(self.hook("completion_gate", {}))
+
     def test_stop_noop_without_run_or_stamps(self):
         self.assertIsNone(self.hook("completion_gate", {}))
         self.activate()
@@ -123,6 +150,24 @@ class Isolation(HookCase):
         out = self.hook("isolation", {"tool_input": {"file_path": str(self.repo / "link" / "f.txt")}})
         self.assertEqual(self.decision(out), "deny")
 
+    def test_isolation_asks_on_corrupt_state(self):
+        self.activate()
+        (self.run_dir / "state.json").write_text("{not json")
+        out = self.hook("isolation", {"tool_input": {"file_path": "/etc/passwd"}})
+        self.assertEqual(self.decision(out), "ask")
+
+    def test_isolation_asks_when_body_raises(self):
+        self.activate()
+        state._mutate(self.run_dir, lambda s: s["repos"].__setitem__("bad", {}))  # entry without path
+        out = self.hook("isolation", {"tool_input": {"file_path": "/etc/passwd"}})
+        self.assertEqual(self.decision(out), "ask")
+
+    def test_isolation_noop_when_pointer_dir_has_no_state(self):
+        ptr = self.home / ".config" / "kinetic"
+        ptr.mkdir(parents=True)
+        (ptr / "active-run").write_text(str(self.run_dir))
+        self.assertIsNone(self.hook("isolation", {"tool_input": {"file_path": "/etc/passwd"}}))
+
     def test_isolation_noop_without_run(self):
         self.assertIsNone(self.hook("isolation", {"tool_input": {"file_path": "/etc/passwd"}}))
 
@@ -145,8 +190,58 @@ class Confirm(HookCase):
     def test_gh_pr_asks_and_plain_commands_pass(self):
         self.assertEqual(self.bash("gh pr create --title x"), "ask")
         self.assertEqual(self.bash("echo ok; gh pr merge 3"), "ask")
-        self.assertIsNone(self.bash("git commit -m 'push fix'"))
+        self.assertEqual(self.bash("git commit -m 'push fix'"), "ask")
+        self.assertIsNone(self.bash("git commit -m 'fix typo'"))
         self.assertIsNone(self.bash("git status"))
+
+    def test_push_bypass_forms_denied(self):
+        for cmd in ("true & git push origin main", "(git push origin main)", "echo $(git push origin main)",
+                    "sudo git push origin main", "env git push origin main", "command git push origin main",
+                    "/usr/bin/git push origin main", "git -C '/a b' push origin main",
+                    "git --git-dir /x/.git push origin main", "bash -c 'git push origin main'",
+                    "git p origin main", "(cd repo && git push origin main)",
+                    "git push --all", "git push --mirror origin"):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+
+    def test_push_variants_ask_and_alias_asks(self):
+        self.assertEqual(self.bash("sudo git push origin feature"), "ask")
+        self.assertEqual(self.bash("git p origin feature"), "ask")
+        self.assertEqual(self.bash("bash -c 'gh pr merge 3'"), "ask")
+        self.assertEqual(self.bash("git push origin x && git checkout main"), "ask")
+
+    def mcp(self, name, **inp):
+        return self.decision(self.hook("confirm_write_ops", {"tool_name": name, "tool_input": inp}))
+
+    def test_mcp_names_and_branch_deny(self):
+        self.assertEqual(self.mcp("mcp__plugin_atlassian_atlassian__addOrEditJiraIssueComment"), "ask")
+        self.assertEqual(self.mcp("mcp__plugin_atlassian_atlassian__executeWrite"), "ask")
+        self.assertEqual(self.mcp("mcp__github-server__push_files", branch="main"), "deny")
+        self.assertEqual(self.mcp("mcp__github-server__create_or_update_file", branch="Release-2"), "deny")
+        self.assertEqual(self.mcp("mcp__github-server__push_files", branch="feat/x"), "ask")
+
+    def test_matchers_cover_real_tools(self):
+        import re
+        cfg = json.loads((HOOKS / "hooks.json").read_text())["hooks"]["PreToolUse"]
+        m = [e["matcher"] for e in cfg if "confirm_write_ops" in e["hooks"][0]["command"]][0]
+        for n in ("mcp__plugin_atlassian_atlassian__addOrEditJiraIssueComment",
+                  "mcp__plugin_atlassian_atlassian__executeWrite",
+                  "mcp__plugin_atlassian_atlassian__executeDestructive",
+                  "mcp__github-server__push_files", "mcp__github-server__delete_file", "Bash"):
+            self.assertTrue(re.fullmatch(m, n), n)
+
+    def test_import_failure_fails_closed(self):
+        import shutil
+        d = Path(self.tmp.name) / "bare" / "hooks"
+        d.mkdir(parents=True)
+        for f in HOOKS.glob("*.py"):
+            shutil.copy(f, d / f.name)
+        self.activate()
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        env["HOME"] = str(self.home)
+        p = subprocess.run([sys.executable, str(d / "isolation.py")], capture_output=True, text=True, env=env,
+                           input=json.dumps({"tool_input": {"file_path": "/etc/passwd"}}))
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
 
     def test_mcp_write_asks(self):
         out = self.hook("confirm_write_ops", {"tool_name": "mcp__github__create_pull_request", "tool_input": {}})
@@ -160,6 +255,7 @@ class Confirm(HookCase):
         p = subprocess.run([sys.executable, str(HOOKS / "confirm_write_ops.py")], input="{bad",
                            capture_output=True, text=True, env=env)
         self.assertEqual(p.returncode, 0)
+        self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
 
 
 class RecordEditAndOrient(HookCase):
@@ -167,6 +263,24 @@ class RecordEditAndOrient(HookCase):
         self.activate()
         self.assertIsNone(self.hook("record_edit", {"tool_input": {"file_path": str(self.repo / "a.py")}}))
         self.assertTrue(state.load(self.run_dir)["repos"]["api"]["last_edit_at"])
+
+    def test_record_edit_resolves_relative_against_cwd(self):
+        self.activate()
+        self.hook("record_edit", {"tool_input": {"file_path": "a.py"}, "cwd": str(self.repo)})
+        self.assertTrue(state.load(self.run_dir)["repos"]["api"].get("last_edit_at"))
+
+    def test_record_edit_notebook_and_matcher(self):
+        self.activate()
+        self.hook("record_edit", {"tool_input": {"notebook_path": str(self.repo / "n.ipynb")}})
+        self.assertTrue(state.load(self.run_dir)["repos"]["api"].get("last_edit_at"))
+        cfg = json.loads((HOOKS / "hooks.json").read_text())["hooks"]["PostToolUse"]
+        self.assertIn("NotebookEdit", cfg[0]["matcher"])
+
+    def test_orient_collapses_whitespace(self):
+        self.activate()
+        state.set_ticket(self.run_dir, "T-1", repo="api", status="needs_decision")
+        text = self.hook("orient", {})["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(text.splitlines()), 5)
 
     def test_record_edit_noop_without_run(self):
         self.assertIsNone(self.hook("record_edit", {"tool_input": {"file_path": "/x"}}))
