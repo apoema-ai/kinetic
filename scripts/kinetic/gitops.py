@@ -130,6 +130,8 @@ def main(argv=None) -> int:
     m.add_argument("--integration-branch", required=True)
     mo = sub.add_parser("merge-order")
     mo.add_argument("--run", required=True)
+    sw = sub.add_parser("ships-with")
+    sw.add_argument("--run", required=True)
     pn = sub.add_parser("pin")
     pn.add_argument("--run", required=True)
     pn.add_argument("--upstream", required=True)
@@ -144,6 +146,8 @@ def main(argv=None) -> int:
             rc = 0 if out["merged"] else 1
         elif a.cmd == "merge-order":
             out, rc = {"order": merge_order(state.load(a.run))}, 0
+        elif a.cmd == "ships-with":
+            out, rc = {"groups": ships_with_groups(state.load(a.run))}, 0
         else:
             out = pin(a.run, a.upstream, a.downstream)
             rc = 0 if out["ok"] else 1

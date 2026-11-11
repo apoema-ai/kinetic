@@ -144,6 +144,21 @@ class MergeOrderTests(unittest.TestCase):
         self.assertEqual(gitops.ships_with_groups({"tickets": tickets}),
                          {"g": ["a", "z"], "solo": ["q"]})
 
+    def test_ships_with_cli(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as d:
+            run_dir = Path(d) / "run"
+            with contextlib.redirect_stdout(io.StringIO()):
+                state.init(run_dir, "feature", "X-1")
+                state.set_ticket(run_dir, "A", repo="z", ships_with="g")
+                state.set_ticket(run_dir, "B", repo="a", ships_with="g")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = gitops.main(["ships-with", "--run", str(run_dir)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue()), {"groups": {"g": ["a", "z"]}})
+
 
 class PinTests(unittest.TestCase):
     def setUp(self):

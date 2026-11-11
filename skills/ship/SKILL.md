@@ -50,7 +50,7 @@ git -C <repo_path> diff origin/<base_branch>..<integration-branch> --stat
 git -C <repo_path> diff origin/<base_branch>..<integration-branch>
 ```
 
-Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (see "PR body template") to `<dir>/pr/<repo>.md` with the `<<RELATED_PRS>>` and `<<DEPENDS_ON>>` placeholders left in place.
+Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (see "PR body template") to `<dir>/pr/<repo>.md` with the `<<RELATED_PRS>>`, `<<DEPENDS_ON>>` and `<<SHIPS_WITH>>` placeholders left in place (PR numbers do not exist yet; the WARNING alert's "Merge together with" line is left out until step 3).
 
 **Review loop before saving.** Re-read the draft as a teammate who has seen neither the diff nor the tickets, fix what fails, and re-read, up to 3 rounds:
 
@@ -68,7 +68,7 @@ Show one table before the first push: repo, integration branch, title, base, PR 
 
 Then for each repo that needs a PR, in merge order:
 
-1. Copy the body and fill the placeholders with what is known so far (see "Depends on and Related PRs"), and write it back to `<dir>/pr/<repo>.md`.
+1. Copy the body and fill the placeholders with what is known so far (see "Depends on and Related PRs" and the `<<SHIPS_WITH>>` row of the placeholder table), and write it back to `<dir>/pr/<repo>.md`.
 2. Push and open the draft:
 
 ```
@@ -76,11 +76,11 @@ git -C <repo_path> push -u origin <integration-branch>
 gh pr create --draft --base <base_branch> --head <integration-branch> --title "<title>" --body-file <dir>/pr/<repo>.md
 ```
 
-3. Record the PR URL and number. Later repos' Depends on and Related PRs use it.
+3. Record the PR URL and number. Later repos' Depends on, Related PRs and Ships with use it.
 
 ### 4. Backfill
 
-An early PR cannot list siblings created after it. Once all PRs exist, for each PR **created in this run** whose Related PRs is now incomplete, rebuild its body from the placeholder version with the complete list, write it to `<dir>/pr/<repo>.md` and `gh pr edit <url> --body-file <dir>/pr/<repo>.md`. Skip when fewer than two PRs exist.
+An early PR cannot list siblings created after it. Once all PRs exist, for each PR **created in this run** whose Related PRs or Ships with is now incomplete, rebuild its body from the placeholder version with the complete lists (Ships with and the alert's "Merge together with" line are rebuilt from the same data), write it to `<dir>/pr/<repo>.md` and `gh pr edit <url> --body-file <dir>/pr/<repo>.md`. Skip when fewer than two PRs exist.
 
 ### 5. Report
 
@@ -104,8 +104,8 @@ Resolve the template with `python3 -m kinetic.tracker pr-template --repo <worktr
 | `<<DESIGN_DECISIONS>>` | A table: `\| Decision \| Why \|` header, then one row per decision, `<what was decided>` and `<why this over the alternative>`. |
 | `<<ARCHITECTURE>>` | A `text` fenced ASCII diagram of the implementation architecture, ending with the legend line `* = changed in this PR`. |
 | `<<ATTENTION_POINTS>>` | A `> [!WARNING]` alert with merge blockers and temporary pins (only if any), then bullets: `**Risk:**` (one-way or two-way door; blast radius narrow / moderate / wide), what a reviewer or deployer must know (ordering, migrations, flags, behavior changes), `**Evidence:**` (before vs after, plus the verify command and its result), `**Unverified / gaps:**`. |
-| `<<MANUAL_STEPS>>` | Each human ticket (`kind` human) that this repo's tickets are blocked by or related to, as `- <ref> - <title> (done by human: <note or link>)`; the note is the ticket's `human_note`. A human ticket not yet done also goes into the WARNING alert as a merge blocker. Ship still opens the drafts. |
-| `<<SHIPS_WITH>>` | `Merge together with: <org>/<repo>#<n>, ...` from `kinetic.gitops.ships_with_groups(state)` (a function, no CLI: run it with `python3 -c`; the other repos in this repo's group, as their PRs are known). Every PR in a group gets the same line, also as a line in the WARNING alert. |
+| `<<MANUAL_STEPS>>` | Each human ticket (`kind` human) that this repo's tickets are blocked by or related to, as `- <ref> - <title> (done by human: <note or link>)`; the note is the ticket's `human_note`. In a 0.2.0 state a missing `kind` means agent and a missing `human_note` means none. Only a not-yet-done human ticket this repo's tickets are blocked by (directly, via `blocked_by`) also goes into the WARNING alert as a merge blocker; one that is only related is listed here but is not a blocker. Ship still opens the drafts. |
+| `<<SHIPS_WITH>>` | `Merge together with: <org>/<repo>#<n>, ...`. Get the groups with `python3 -m kinetic.gitops ships-with --run <dir>` (prints `{"groups": {group: [repos]}}`); it returns repos, so map each other repo of this repo's group to the PR recorded for it. Filled in step 3 as PRs are created and completed in the step 4 backfill; PRs not yet created are omitted until then. Every PR in a group gets the same line, repeated in the WARNING alert. |
 | `<<RELATED_PRS>>` | See "Depends on and Related PRs". |
 | `<<DEPENDS_ON>>` | See "Depends on and Related PRs". |
 
@@ -120,7 +120,7 @@ The section order is the template's, fixed so reviewers read every PR of a run t
 - **Manual steps and Ships with**: data the skill fills, never invented. A human ticket without a recorded note shows `(done by human)` alone; one not done is listed as open and as a merge blocker.
 - **Design decisions**: where a responsibility was placed, sync vs async, new vs reused abstraction, contract or schema shape, backward compatibility, flag vs hard switch, failure isolation. Skip a decision with no real alternative; omit the subsection for a trivial change.
 - **Architecture (always included)**: a plain ASCII diagram in a `text` fence of the components this change touches, how they connect (calls, events, data reads) and the key methods or messages on the links. At most about 15 lines and 80 columns. Mark what this PR changes with `*` and keep the legend line. Show sibling repos where they sit on the other side of a link. For a flow, put its direction on the links rather than drawing a second diagram. For a small change, draw just the changed component and its neighbors. Every box and link must come from the diff or the repo; an inferred link goes under Unverified / gaps.
-- **Attention points**: the alert holds merge blockers only: a downstream repo pinned to an upstream snapshot (`kinetic.gitops pin`) that must move to a released version, an upstream PR that must merge first. Risk: a two-way door can be walked back, a one-way door (destructive or hard to reverse) cannot; the blast radius is the scope of impact, such as consumer breakage or a pinned downstream repo. Evidence comes from the run's `verify` records and logs: the command, exit code and test counts as recorded, and the failing-then-passing test where the tickets show one. Never invent counts. Other bullets only when they change how someone reviews, merges or deploys: migrations and rollback, deploy ordering, incompatible contract changes, new config or flags and their defaults, behavior differences between environments.
+- **Attention points**: the alert holds merge blockers only: a downstream repo pinned to an upstream snapshot (`kinetic.gitops pin`) that must move to a released version, an upstream PR that must merge first, a human ticket this repo's tickets are blocked by that is not done (from Manual steps), and "Merge together with: ..." (from Ships with). Risk: a two-way door can be walked back, a one-way door (destructive or hard to reverse) cannot; the blast radius is the scope of impact, such as consumer breakage or a pinned downstream repo. Evidence comes from the run's `verify` records and logs: the command, exit code and test counts as recorded, and the failing-then-passing test where the tickets show one. Never invent counts. Other bullets only when they change how someone reviews, merges or deploys: migrations and rollback, deploy ordering, incompatible contract changes, new config or flags and their defaults, behavior differences between environments.
 - About 40 lines or fewer excluding the diagram. Bullets over paragraphs. Drop any section that ends up empty; never leave a blank heading.
 - GitHub markdown for readability, not decoration: tables for decisions and related PRs, the alert for merge blockers only, task lists for dependencies, `<org>/<repo>#<n>` shorthand so links autolink, backticks for identifiers. Long evidence goes in `<details><summary>...</summary>`. No headings deeper than `####`.
 - No CI directive lines (such as `+dep-pr` or `+deploy`); Depends on and the merge order carry the dependency.
