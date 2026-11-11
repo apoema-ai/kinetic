@@ -20,6 +20,11 @@ It merges ideas from three plugins: Matt Pocock's skills (grill, spec, tickets, 
 - [Approval gates](#approval-gates)
 - [The build loop](#the-build-loop)
 - [Ship: what the PRs look like](#ship-what-the-prs-look-like)
+- [Trackers](#trackers)
+- [Human tickets](#human-tickets)
+- [Relationship types](#relationship-types)
+- [The local board and drift](#the-local-board-and-drift)
+- [The PR template override](#the-pr-template-override)
 - [Commands](#commands)
 - [Skills and agents](#skills-and-agents)
 - [Configuration](#configuration)
@@ -33,7 +38,7 @@ It merges ideas from three plugins: Matt Pocock's skills (grill, spec, tickets, 
 
 ## Install
 
-Requirements: macOS or Linux, Python 3.9+, `git`, and `gh` authenticated to GitHub. Jira mode also needs the Atlassian MCP server.
+Requirements: macOS or Linux, Python 3.9+, `git`, and `gh` authenticated to GitHub. Jira mode also needs the Atlassian MCP server; GitHub issues mode needs `gh` with issue access; Linear mode needs a Linear MCP server.
 
 For local use, point Claude Code at a checkout:
 
@@ -45,7 +50,7 @@ Optional companions that kinetic uses when present and falls back without: the `
 
 ## Quick start
 
-1. `/kinetic:init ~/code/api ~/code/web` registers the repos, detects each one's verify command, asks for the tracker (Jira or local) and writes `~/.config/kinetic/`. It ends by running doctor.
+1. `/kinetic:init ~/code/api ~/code/web` registers the repos, detects each one's verify command, asks for the tracker (Jira, GitHub, Linear, local or other) and writes `~/.config/kinetic/`. It ends by running doctor.
 2. `/kinetic:run "let partners export statements as CSV"` (or a Jira key, or a path to a spec) starts a run. kinetic picks a lane, says why in one line, and lets you override it.
 3. Answer the grill questions, approve the spec, approve the ticket breakdown. From there implementers work in the background; you are asked only when one needs a decision.
 4. Approve the ship gate. kinetic pushes the integration branches and opens one draft PR per repo, in merge order.
@@ -252,6 +257,12 @@ Merge in this order: api, web
 - **Evidence:** <verify command and result from the run's verify records>
 - **Unverified / gaps:** <...>
 
+### Manual steps:
+- [ ] <open human tickets this PR needs, with the tracker key>
+
+### Ships with:
+<PRs in other repos that must merge and deploy together>
+
 ### Related PRs:
 | PR | Merge order | Relationship |
 
@@ -260,6 +271,66 @@ Merge in this order: api, web
 ```
 
 Bodies are written for developers: no lists of files touched, every design decision with its reason (or flagged as unverified), evidence taken from the recorded verify runs rather than invented. Each body is re-read as a teammate who has seen neither the diff nor the tickets before it is saved. Once all PRs exist, earlier PRs are updated so their Related PRs list every sibling. No CI directive lines are added; Depends on and the merge order carry the dependency.
+
+## Trackers
+
+The tracker is where tickets live. Pick it once in `~/.config/kinetic/settings.json` (user level only; a repo cannot switch it) with `/kinetic:init`, or edit the file:
+
+| `tracker` | Needs | Settings |
+|---|---|---|
+| `jira` | Atlassian MCP | `jira_project`, `slice_issue_type`, `child_issue_type` |
+| `github` | `gh` | `github_repo` |
+| `linear` | a Linear MCP server | `linear_team` |
+| `local` (the default) | nothing | none |
+| `other` | whatever you describe | `tracker_description` |
+
+Each tracker is one prose file, `trackers/<name>.md`, that tells the skills how to create a ticket, link blockers, set a status and so on in that tracker. No Python talks to a tracker, so adding one means adding one adapter file. Skills use roles, not tracker words: `names.kind.human` (the label or type for a human ticket), `names.edge.merge`, `names.after`, `names.ships_with`, `names.related` and `names.status.<role>`.
+
+To rename any of these for your workspace, override them in `settings.json`:
+
+```json
+{
+  "tracker": "jira",
+  "tracker_settings": { "jira_project": "INV", "slice_issue_type": "Story", "child_issue_type": "Sub-task" },
+  "tracker_names": { "kind": { "human": "manual" }, "status": { "done": "Closed" } }
+}
+```
+
+`tracker_names` is merged key by key over the adapter's defaults; a missing role is an error. The top-level `jira_project`, `slice_issue_type` and `child_issue_type` keys from 0.2.0 are still read. `python3 -m kinetic.tracker resolve` prints what kinetic resolved. kinetic state stays authoritative: remote trackers are written to, never read back.
+
+## Human tickets
+
+Some steps only a person can do: request a credential, flip a flag in a console, get a sign-off. A ticket with `kind: human` models it. It has no repo, is never dispatched to an implementer, and sits in the graph like any ticket, so other tickets can be blocked by it.
+
+- **Waiting on you.** `/kinetic:status` and the board list human tickets whose blockers are satisfied under "Waiting on you".
+- **Only human work left.** When nothing is ready or running and every remaining ticket is human or behind a human ticket you can act on, the run pauses and says so instead of reporting a stall.
+- **`human-done`.** `python3 -m kinetic.state human-done --run <run_dir> --id <id> [--note "..."]` marks it done. `set-ticket` refuses `done` on a human ticket. An edge onto a human blocker is satisfied when it is `done`, whatever its edge type.
+- **`NEEDS_HUMAN`.** An implementer that hits a step only a person can do reports `NEEDS_HUMAN`. kinetic creates a new human ticket, blocks the original on it and parks the original until you finish it. The original keeps its repo and worktree.
+- **Ship.** Ship still opens draft PRs while a human ticket is open; open human tickets that block a repo's tickets appear as a merge blocker under Attention points and in Manual steps.
+
+## Relationship types
+
+Besides `blocked_by` (with the `snapshot`, `merge` and `release` edge types), tickets can carry three softer relationships:
+
+| Field | Meaning | Effect |
+|---|---|---|
+| `after` | Prefer to build this after another ticket | Breaks ties in build order only; never blocks, and a soft cycle is ignored |
+| `ships_with` | A group name shared by tickets that must be released together | Merge order puts the group's repos next to each other when blockers allow; PR bodies get a "Ships with" section |
+| `related` | Context only | Listed in the ticket and PR |
+
+`graph validate` reports unknown `after` or `related` ids, an `after` that contradicts a `blocked_by`, and a `ships_with` group of one ticket. `python3 -m kinetic.gitops ships-with --run <run_dir>` prints the groups by repo. Tickets written by 0.2.0 need no migration: missing fields default to `kind` agent and empty relationships.
+
+## The local board and drift
+
+In local mode tickets are markdown files under `<run_dir>/issues/`, and `issues/README.md` is a board: "Waiting on you" first, then every ticket with its kind, status and blockers. kinetic state is the source of truth; the files are a view of it.
+
+- `python3 -m kinetic.board header --run <run_dir> --id <id>` writes a ticket file's header (Status, Type, Repo, Slice, Blocked by, After, Ships with, Related, Assignee). Comments below the header are kept. Assignee is derived (human: the user, agent: the implementer), not stored.
+- `python3 -m kinetic.board render --run <run_dir>` rewrites the board.
+- `python3 -m kinetic.board drift --run <run_dir>` lists files that disagree with state. A file written by hand shows drift until its first `header`. If you mark a human ticket done by editing its file, kinetic sees the drift and asks before applying it.
+
+## The PR template override
+
+Ship fills one template for every PR. The default is `templates/pr-body.md`. To use your own, set `pr_template` to a file path, in `settings.json` for every repo or in a repo-root `.kinetic.json` for one repo. The first of repo `.kinetic.json`, `settings.json` and the plugin default wins; a relative path resolves against the directory of the file that set it, and a configured file that is missing is an error. `python3 -m kinetic.tracker pr-template --repo <path>` prints the path used. Placeholders are `<<TITLE_KEY>>`, `<<TICKETS>>`, `<<DESCRIPTION>>`, `<<DESIGN_DECISIONS>>`, `<<ARCHITECTURE>>`, `<<ATTENTION_POINTS>>`, `<<MANUAL_STEPS>>`, `<<SHIPS_WITH>>`, `<<RELATED_PRS>>` and `<<DEPENDS_ON>>`; the filled placeholders are kept in `<run_dir>/pr/<repo>.placeholders.md` for the backfill once all PRs exist.
 
 ## Commands
 
@@ -338,7 +409,7 @@ A repo-root `.kinetic.json` with the same keys overrides the central entry key b
 }
 ```
 
-With `"tracker": "local"` the three Jira fields are null and tickets are files under `<run_dir>/issues/`.
+With `"tracker": "local"` (or no `tracker` key) tickets are files under `<run_dir>/issues/`. See [Trackers](#trackers) for the other trackers, `tracker_settings` and `tracker_names`, and [The PR template override](#the-pr-template-override) for `pr_template`.
 
 ## Where state lives
 
@@ -405,13 +476,15 @@ docs/                        comparison, design spec, implementation plan, rulin
 | Module | Responsibility |
 |---|---|
 | `state.py` | Run state: init, phase, slices, tickets, repos, gates, rulings, verify and edit stamps, owner session; flock-guarded atomic writes; CLI (whose `set-ticket` refuses `done` without a passing, current verify) |
-| `graph.py` | Validates the ticket graph (missing repo, edge types, unknown blockers, unused slices, cycles, consumers without an edge to their producer; unproduced interfaces as warnings) and gives a topological order |
-| `frontier.py` | Ready tickets: satisfied blockers, the cap of 3 running, one per repo |
-| `gitops.py` | `worktree`, `merge` (ticket into integration), `merge-order` across repos, `pin` downstream repos to a snapshot |
+| `graph.py` | Validates the ticket graph (missing repo except on human tickets, edge types, unknown blockers, unused slices, cycles, consumers without an edge to their producer, unknown or contradicting `after`/`related`, lone `ships_with` groups; unproduced interfaces as warnings) and gives a topological order that honours `after` |
+| `frontier.py` | Ready tickets (never human): satisfied blockers, the cap of 3 running, one per repo; `waiting_on_you` and `only_human_left` for human tickets |
+| `gitops.py` | `worktree`, `merge` (ticket into integration), `merge-order` across repos (ships-with neighbours kept together), `ships-with` groups, `pin` downstream repos to a snapshot |
 | `verify.py` | Runs a repo's verify command, logs it and records the result in state |
 | `config.py` | Resolves a repo's config from `repos.json` and `.kinetic.json` |
 | `detect_repos.py` | Proposes a verify command from build markers (Maven, Gradle, npm, Go, Cargo, pyproject, Makefile) |
-| `doctor.py` | The health checks behind `/kinetic:doctor` |
+| `tracker.py` | Resolves the tracker adapter, its settings and role names, and the PR template path |
+| `board.py` | Local ticket headers, the `issues/README.md` board and the drift check |
+| `doctor.py` | The health checks behind `/kinetic:doctor`, including tracker access and the PR template |
 | `spec_lint.py` | Checks a spec has non-empty Threat model, Non-functional requirements and Acceptance criteria sections |
 | `status.py` | Renders `/kinetic:status` |
 | `next_step.py` | Computes the next step for `/kinetic:ask` and the SessionStart hook |
@@ -426,13 +499,14 @@ The suite covers every script module and every hook, plus an end-to-end test tha
 
 ## Status and known limitations
 
-kinetic is at v0 (see `.claude-plugin/plugin.json` for the version). The scripts and hooks are tested; the skills and agents have not yet been exercised in a live end-to-end run. `docs/plan/kinetic-v0-rulings.md` records every decision made while building it and the v0.2 backlog.
+kinetic is at 0.3.0 (see `.claude-plugin/plugin.json`); 0.3.0 adds trackers, human tickets, relationship types, the local board and the PR template override. The scripts and hooks are tested; the skills and agents have not yet been exercised in a live end-to-end run. `docs/plan/kinetic-v0-rulings.md` records every decision made while building it and the v0.2 backlog.
 
 Not yet verified in a live session:
 
 - that `${CLAUDE_PLUGIN_ROOT}` expands where the skills use it;
 - that `skills: [tdd]` resolves to kinetic's own `tdd` skill;
-- whether subagent hook payloads carry the parent session id (the cwd rule covers implementers either way).
+- whether subagent hook payloads carry the parent session id (the cwd rule covers implementers either way);
+- the Jira, GitHub and Linear adapters against the real services: they are untested live, including whether the installed `gh` supports sub-issues and "blocked by" and which relation tools the Linear MCP exposes (the adapters have fallbacks, but no test checks them).
 
 Known limitations:
 
@@ -440,6 +514,7 @@ Known limitations:
 - `gh api` calls (including merges) pass the write-ops hook, and base branches other than `main`, `master` and `Release*` are not protected.
 - Isolation cannot tell implementers apart within the run directory.
 - Until a session claims the run, or when a hook payload has no session id, the run-scoped hooks act on every session.
+- Write confirmation hooks cover the Atlassian MCP and Bash only; Linear and other MCP writes are not hook-confirmed, only covered by the grant.
 - No skill evals yet; `/kinetic:status` shows no PR health or Jira transitions.
 
 ## License

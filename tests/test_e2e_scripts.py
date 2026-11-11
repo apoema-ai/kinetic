@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from kinetic import frontier, gitops, graph, next_step, state, verify
+from kinetic import board, frontier, gitops, graph, next_step, state, verify
 from tests.fixtures import two_repo
 
 
@@ -68,6 +68,58 @@ class EpicFlowTests(unittest.TestCase):
             self.assertEqual(gitops.merge_order(load()), ["svc", "lib"])
             state.set_phase(run, "build")
             self.assertEqual(next_step.suggest(load())["reason"], "review and ship")
+
+    def test_epic_flow_with_human_and_ships_with(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = two_repo.build(Path(tmp) / "repos")
+            run = Path(tmp) / "run"
+            rid = state.init(run, "epic", "E-2")["run_id"]
+            integ_branch = f"kinetic/{rid}/integration"
+            for name in ("lib", "svc"):
+                wt = run / "worktrees" / name
+                gitops.create_worktree(fx[name], wt, integ_branch, "main")
+                state.set_repo(run, name, str(wt), integ_branch)
+            state.set_ticket(run, "L1", repo="lib")
+            state.set_ticket(run, "H1", kind="human",
+                             blocked_by=[{"id": "L1", "type": "merge"}])
+            state.set_ticket(run, "S1", repo="svc", ships_with="g",
+                             blocked_by=[{"id": "H1", "type": "merge"}])
+            state.set_ticket(run, "L2", repo="lib", ships_with="g",
+                             blocked_by=[{"id": "S1", "type": "merge"}])
+            load = lambda: state.load(run)
+            self.assertEqual(graph.validate(load()["tickets"], "epic"), [])
+            self.assertEqual(frontier.ready(load()), ["L1"])
+
+            def build_ticket(tid):
+                repo = load()["tickets"][tid]["repo"]
+                wt = run / "worktrees" / f"{repo}-{tid}"
+                branch = f"kinetic/{rid}/{tid}"
+                gitops.create_worktree(load()["repos"][repo]["path"], wt, branch, integ_branch)
+                state.set_ticket(run, tid, branch=branch, worktree=str(wt), status="running")
+                commit(wt, f"{tid}.txt")
+                state.record_edit(run, str(wt / f"{tid}.txt"))
+                v = verify.run(run, tid, repo, str(wt), central=fx["central"])
+                self.assertEqual(v["exit_code"], 0)
+                state.set_ticket(run, tid, status="done")
+                res = gitops.merge_ticket(load()["repos"][repo]["path"], branch, integ_branch)
+                self.assertEqual(res, {"merged": True, "conflicts": []})
+                state.set_ticket(run, tid, status="merged")
+
+            build_ticket("L1")
+            self.assertEqual(frontier.ready(load()), [])
+            self.assertEqual(frontier.waiting_on_you(load()), ["H1"])
+            self.assertTrue(frontier.only_human_left(load()))
+            state.human_done(run, "H1", "ok")
+            self.assertEqual(frontier.ready(load()), ["S1"])
+            build_ticket("S1")
+            self.assertEqual(frontier.ready(load()), ["L2"])
+            build_ticket("L2")
+            self.assertEqual(gitops.ships_with_groups(load()), {"g": ["lib", "svc"]})
+            for tid in ("L1", "H1", "S1", "L2"):
+                board.write_header(run, tid)
+            text = board.render(run).read_text()
+            for tid in ("L1", "H1", "S1", "L2"):
+                self.assertIn(tid, text)
 
 
 if __name__ == "__main__":
