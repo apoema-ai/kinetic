@@ -8,9 +8,11 @@ argument-hint: "<JIRA-KEY|idea|spec-path> [--from build]"
 
 # Kinetic run
 
-You are the orchestrator. Only you set phases, record gates and dispatch agents. Phase skills are loaded by reading their file and following it, never via the Skill tool: "read and follow `skills/<name>/SKILL.md`" (under `${CLAUDE_PLUGIN_ROOT}`), passing `Run: <run_dir>`.
+You are the orchestrator. Only you set phases, record gates and dispatch agents. Phase skills are loaded by reading their file and following it, never via the Skill tool: "read and follow `skills/<name>/SKILL.md`" (under `${CLAUDE_PLUGIN_ROOT}`), passing `Run: <run_dir>`. These phase skills run inline on your model; `model:` in their frontmatter is not applied.
 
-Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`. Never edit `state.json` by hand and never read code or full diffs yourself: scripts emit JSON, agents write reports, you read report headers.
+Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
+
+Plugin root: `${CLAUDE_PLUGIN_ROOT}` is expanded in this file only. A phase skill or guide you read with Read reaches you with `${CLAUDE_PLUGIN_ROOT}` unexpanded: substitute this file's plugin root for it as you follow them. Agents get no expansion at all: every agent brief carries a literal absolute `Scripts: <plugin-root>/scripts` line (see `build-loop.md`). Never edit `state.json` by hand and never read code or full diffs yourself: scripts emit JSON, agents write reports, you read report headers.
 
 Guides (read each at the point named, under `${CLAUDE_PLUGIN_ROOT}/skills/run/guides/`):
 

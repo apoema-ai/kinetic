@@ -14,9 +14,9 @@ Requires macOS or Linux, Python 3.9+, git. Then run `/kinetic:init` first: it re
 
 ## Lanes
 
-- **Full lane**: idea or bare ticket. grill, spec, tickets, build, review, ship, retro.
-- **Spec lane**: you already have a spec. Starts at tickets (repo detection first), then build.
-- **Quick lane**: one small ticket, no spec. Straight to build.
+- **`epic`**: several repos. All phases, per-repo integration branches, typed edges. Starts at grill for an idea or bare ticket, or at tickets (repo detection first) when you already have a spec.
+- **`feature`**: one repo, needs a spec. grill, spec, tickets, build, review, ship, retro.
+- **`quick`**: one small ticket, no spec. Intake, build, review, ship, retro; one breakdown question records the grant.
 
 `/kinetic:run` picks the lane from what you hand it. Phases and approval gates are set only by `/kinetic:run`.
 
@@ -53,6 +53,7 @@ Dependency edges are exactly `snapshot`, `merge` and `release` (Jira labels `edg
 
 - The active-run pointer is machine-global, so the hooks act on every Claude session while a run is active.
 - A bare `git push` on a protected branch only asks; it is not denied.
+- `gh api` calls (including merges) pass through the write-ops hook, and base branches other than `main`, `master` and `Release*` are not protected.
 - Isolation cannot tell implementers apart within the run dir.
 
 ## Tests

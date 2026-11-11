@@ -10,6 +10,8 @@ Interview the user relentlessly until you reach a shared understanding, and writ
 
 The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`) and the ref being grilled. Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`. This skill never invokes another skill.
 
+Write the domain docs under `<dir>/docs/`, never into a repo checkout: the isolation hook denies writes outside the run directory and registered repos, and the orchestrator points implementers at `<dir>/docs/`. Read a repo's own `GLOSSARY.md` and ADRs if it has them; when updating one, copy it into `<dir>/docs/` first and edit the copy.
+
 ## Interview rules
 
 Map the plan as a **design tree**: every decision branches into the decisions that hang off it.
@@ -57,7 +59,7 @@ Build and sharpen the project's domain model while interviewing:
 
 ### GLOSSARY.md
 
-Update `GLOSSARY.md` the moment a term is resolved; do not batch. Create it lazily when the first term is resolved. Format:
+Update `<dir>/docs/GLOSSARY.md` the moment a term is resolved; do not batch. Create it lazily when the first term is resolved. Format:
 
 ```md
 # {Context Name}
@@ -75,7 +77,7 @@ Be opinionated: pick one word per concept and list the rest under `_Avoid_`. Onl
 
 ### ADRs
 
-Offer an ADR only when all three are true: the decision is **hard to reverse**, **surprising without context**, and **the result of a real trade-off**. Otherwise skip it. ADRs live in `docs/adr/` as `0001-slug.md`, numbered by scanning for the highest existing number; create the directory lazily. Format: a title and 1-3 sentences (context, decision, why). Optional sections (Status, Considered Options, Consequences) only when they add real value.
+Offer an ADR only when all three are true: the decision is **hard to reverse**, **surprising without context**, and **the result of a real trade-off**. Otherwise skip it. ADR drafts live in `<dir>/docs/adr/` as `0001-slug.md`, numbered by scanning for the highest existing number across the repo's `docs/adr/` and this directory; create the directory lazily. Format: a title and 1-3 sentences (context, decision, why). Optional sections (Status, Considered Options, Consequences) only when they add real value.
 
 ## Record the outcome
 

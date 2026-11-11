@@ -1,7 +1,7 @@
 ---
 name: tickets
 description: Break the approved spec into vertical slices (parent tickets) and per-repo child tickets with typed blocking edges, publish them, and record them in run state. Use at the tickets phase of a kinetic run.
-model: opus
+model: sonnet
 ---
 
 # Tickets
@@ -35,7 +35,7 @@ Give each child ticket its **blocking edges**, each with a type:
 - `merge`: downstream waits for the upstream merge.
 - `release`: downstream waits for a released version.
 
-Use only these three types. A ticket with no blockers can start immediately. Prefer `snapshot` across repos when the upstream can publish one; use `merge` or `release` only when the downstream genuinely cannot proceed earlier.
+Use only these three types. A ticket with no blockers can start immediately. Use a `snapshot` edge between two repos only when the upstream repo's config has `publish_snapshot` and the downstream repo's has `pin` (read `~/.config/kinetic/repos.json` and each repo's `.kinetic.json`); without them the pin step cannot run and the downstream ticket never becomes ready, so use `merge`. Use `release` only when the downstream genuinely needs a released version: the orchestrator marks it released by hand, so say so in the ticket. Within one repo prefer `merge`.
 
 **Wide refactors are the exception to vertical slicing.** One mechanical change (rename a column, retype a shared symbol) whose blast radius fans across the codebase cannot land green as a single slice. Sequence it as expand-contract: expand (add the new form beside the old), migrate call sites in batches sized by blast radius (each batch its own ticket blocked by the expand), then contract (delete the old form, blocked by every migrate batch).
 

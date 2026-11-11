@@ -20,7 +20,7 @@ The question must spell out the grant in substance:
 
 > Approving this breakdown grants the build agents, for the tickets and repos listed, to: commit and push to the ticket branch, make Jira transitions, and open draft PRs. It never grants: pushes to master or Release branches, force-push after review, deploys without the deploy hook's confirmation, or prod data writes.
 
-Options: approve (record the grant), revise tickets. The run's Grant line given to each implementer is the approved wording shortened to: `Grant: commit and push to ticket branch; Jira transitions; draft PRs; never master/Release, force-push after review, deploys, prod data writes`. Do not extend it.
+Options: approve (record the grant), revise tickets. In the quick lane this is the same question with the single ticket; also ask which seams its tests may use, and put the answer in the ticket file. The run's Grant line given to each implementer is the approved wording shortened to: `Grant: commit and push to ticket branch; Jira transitions; draft PRs; never master/Release, force-push after review, deploys, prod data writes`. Do not extend it.
 
 ## Ship gate (before the ship skill)
 

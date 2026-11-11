@@ -10,13 +10,13 @@ First count the repos in play: `python3 -m kinetic.detect_repos PATH [PATH ...]`
 | feature | One repo, needs a spec | grill, spec, tickets, build, review, ship, retro |
 | epic | Several repos | all phases; per-repo integration branches, typed edges |
 
-Quick lane: no grill, spec or tickets phase and no gates except ship. You create the one ticket yourself in state:
+Quick lane: no grill, spec or tickets phase. Its gates are a one-question breakdown gate (it records the grant, see `gates.md`) and the ship gate. You create the one ticket yourself in state:
 
 ```
 python3 -m kinetic.state set-ticket --run <run_dir> --id <id> --field repo=<repo> --field 'blocked_by=[]'
 ```
 
-The id is the Jira key if the ref is one, else `01-<repo>-<slug>` (local mode). Then go to build.
+The id is the Jira key if the ref is one, else `01-<repo>-<slug>` (local mode). Then ask the breakdown gate with just that one ticket (id, repo, no blockers) and the seams to test (the implementer has no one to ask, see `agents/implementer.md`), record it, and go to build. `build-loop.md` writes `<run_dir>/issues/<id>.md` from the ref before dispatch.
 
 ## Entry point: start at the first missing artifact
 
@@ -33,4 +33,4 @@ A spec brought in from outside still needs the spec gate before tickets. Tickets
 
 ## `--from build`
 
-Skips straight to build. Requires tickets already in state, or a ticket ref (the `/kinetic:implement` case): for a ref, register that one ticket as in the quick lane. If neither exists, say so and point at `/kinetic:run <ref>` without the flag. The breakdown gate still applies: record it before dispatching.
+Skips straight to build. Requires tickets already in state, or a ticket ref (the `/kinetic:implement` case): for a ref, register that one ticket as in the quick lane, including the seams question; `build-loop.md` writes `<run_dir>/issues/<id>.md` from the ref (a ticket file outside the run dir is copied there). If neither exists, say so and point at `/kinetic:run <ref>` without the flag. The breakdown gate still applies: record it before dispatching.

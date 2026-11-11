@@ -26,22 +26,22 @@ python3 -m kinetic.gitops merge-order --run <dir>
 
 It prints the ordered repo list (and errors on a dependency cycle).
 
-2. For each repo in that order, from its repo path: write the PR body (template below) to a temp file, push the integration branch, and open the draft:
+2. For each repo in that order, from its repo path: write the PR body (template below) to `<dir>/pr/<repo>.md` (create `<dir>/pr/`; never `/tmp`, isolation denies writes outside the run directory), push the integration branch, and open the draft:
 
 ```
 git push -u origin <integration-branch>
-gh pr create --draft --base <base_branch> --head <integration-branch> --title "<title>" --body-file <file>
+gh pr create --draft --base <base_branch> --head <integration-branch> --title "<title>" --body-file <dir>/pr/<repo>.md
 ```
 
 Collect each PR URL as it is created.
 
-3. Siblings link each other. Since later PRs are not known when earlier ones are created, after all PRs exist update each body so its "Related PRs" list names every sibling PR with its position in the merge order and the edge type that orders it (`gh pr edit <url> --body-file <file>`). State plainly in each body: "Merge in this order: ...".
+3. Siblings link each other. Since later PRs are not known when earlier ones are created, after all PRs exist update each body so its "Related PRs" list names every sibling PR with its position in the merge order and the edge type that orders it (`gh pr edit <url> --body-file <dir>/pr/<repo>.md`). State plainly in each body: "Merge in this order: ...".
 
-4. Report the PR URLs in merge order to the orchestrator, which records the ship approval.
+4. Report the PR URLs in merge order to the orchestrator. (The ship approval was already recorded at the ship gate, before this skill ran.)
 
 ## PR body template
 
-Skip preambles and keep prose brief. Use the user's domain language from `GLOSSARY.md`.
+Skip preambles and keep prose brief. Use the user's domain language from `<dir>/docs/GLOSSARY.md` (or the repo's `GLOSSARY.md`).
 
 ```markdown
 ## Summary

@@ -15,6 +15,8 @@ You implement one ticket in one worktree, then report. The `tdd` skill is preloa
 The orchestrator gives you these lines. If any is missing, report BLOCKED.
 
 - `Run: <run_dir>`
+- `Scripts: <absolute path to the plugin scripts directory>`
+- `Docs: <run_dir>/docs` (glossary and ADR drafts from the grill phase; may not exist)
 - `Ticket: <id>`
 - `Repo: <worktree>` (also gives `Repo name:` if it differs from the directory name)
 - `Ticket file or Jira key` (read the file, or fetch the issue through the Atlassian MCP)
@@ -23,7 +25,7 @@ The orchestrator gives you these lines. If any is missing, report BLOCKED.
 
 ## What you read
 
-Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADRs if present, and the code in `Repo`. Tickets carry pointers, not copies; follow them rather than asking for more context.
+Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADRs under `Docs` and in `Repo` if present, and the code in `Repo`. Tickets carry pointers, not copies; follow them rather than asking for more context.
 
 ## Rules
 
@@ -32,6 +34,7 @@ Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADR
 - Never set phases or gates, never edit `state.json`, never dispatch subagents.
 - Stay within the Grant. Anything outside it is NEEDS_DECISION or BLOCKED.
 - Do only what the ticket's acceptance criteria require. No extras.
+- Test seams are pre-agreed: the `tdd` skill says to confirm seams with the user, but you cannot ask. The seams listed in the spec's `## Testing Decisions` (or in the ticket file, in the quick lane) are the confirmed ones. A seam that is not listed is NEEDS_DECISION: write the question under `Questions:` and stop. Never write a test at an unlisted seam.
 
 ## Procedure
 
@@ -39,7 +42,7 @@ Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADR
 2. Work test-first per the `tdd` skill. Commit when green.
 3. Last step, after your final edit, run verify:
 
-   `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.verify --run <run_dir> --repo-name <name> --repo-path <worktree> --ticket <id>`
+   `PYTHONPATH="<Scripts>" python3 -m kinetic.verify --run <run_dir> --repo-name <name> --repo-path <worktree> --ticket <id>`
 
    It prints JSON with the exit code and log path. If you edit anything after verify, re-run it: the completion gate compares edit and verify timestamps per repo.
 4. A non-zero verify means the status cannot be DONE. Fix and re-run, or report BLOCKED with the log path.
