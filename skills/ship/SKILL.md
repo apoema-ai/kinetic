@@ -38,7 +38,7 @@ It prints the ordered repo list, upstream first (and errors on a dependency cycl
    - The lookup fails: an unknown answer is not "no PR". Show the error and ask whether to retry or skip the repo.
    - None: the repo needs a PR.
 
-Title: `<KEY>: <title>`, where KEY is the slice's Jira key in Jira mode, else the run id, and the title is the spec's (or the quick-lane ticket's) title.
+Title: read it from the template's first-line comment `<!-- title: <<TITLE_KEY>>: <title> -->`, with `<<TITLE_KEY>>` from the tracker adapter's "ticket reference" operation (the slice reference, else the run id) and `<title>` the spec's (or the quick-lane ticket's) title. Strip that comment line from the body before posting.
 
 ### 2. Write the bodies
 
@@ -50,7 +50,7 @@ git -C <repo_path> diff origin/<base_branch>..<integration-branch> --stat
 git -C <repo_path> diff origin/<base_branch>..<integration-branch>
 ```
 
-Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (layout below) to `<dir>/pr/<repo>.md` with the `<<RELATED_PRS>>` and `<<DEPENDS_ON>>` placeholders left in place.
+Also read the repo's tickets (state `tickets` whose `repo` is this repo, and their `<dir>/issues/<id>.md`), its newest `verify` record and log, and the bodies already written this run, to keep terminology consistent. Then write the body (see "PR body template") to `<dir>/pr/<repo>.md` with the `<<RELATED_PRS>>` and `<<DEPENDS_ON>>` placeholders left in place.
 
 **Review loop before saving.** Re-read the draft as a teammate who has seen neither the diff nor the tickets, fix what fails, and re-read, up to 3 rounds:
 
@@ -92,48 +92,32 @@ To the orchestrator (the ship approval was already recorded at the ship gate):
 
 Then the merge order with edge types (`api -> web (snapshot)`), every unverified rationale so the author can fill it in before review, and any skipped upstream repo that leaves a downstream PR with a missing dependency.
 
-## PR body layout
+## PR body template
 
-The section order is fixed so reviewers read every PR of a run the same way. If the repo has `.github/pull_request_template.md` with extra sections worth keeping (a checklist), keep them after Description. Use the user's domain language from `<dir>/docs/GLOSSARY.md` (or the repo's `GLOSSARY.md`).
+Resolve the template with `python3 -m kinetic.tracker pr-template --repo <worktree>`. It prints `{"path": ...}`: the repo's `.kinetic.json` `pr_template`, else the `pr_template` in settings, else the plugin's `templates/pr-body.md`. A configured file that is missing is an error: show it and stop, never fall back silently. Read the file and replace each `<<NAME>>` with what fills it:
 
-````markdown
-### Tickets:
-- <KEY or local ticket id> - <ticket title>
-
-### Description:
-<2-4 lines: what changes in this repo and why, in terms of behavior and responsibility>
-
-#### Design decisions
-| Decision | Why |
+| Placeholder | What fills it |
 |---|---|
-| <what was decided> | <why this over the alternative> |
+| `<<TICKETS>>` | One line per ticket merged into this repo, as `- <ref> - <title>`, linked. `<ref>` comes from the tracker adapter's "ticket reference" operation (`python3 -m kinetic.tracker resolve` names the adapter); the title is the ticket's, from `<dir>/issues/<id>.md`. |
+| `<<TITLE_KEY>>` | The slice reference from the same adapter operation, else the run id. Used in the title comment only. |
+| `<<DESCRIPTION>>` | 2-4 lines: what changes in this repo and why, in terms of behavior and responsibility. |
+| `<<DESIGN_DECISIONS>>` | A table: `\| Decision \| Why \|` header, then one row per decision, `<what was decided>` and `<why this over the alternative>`. |
+| `<<ARCHITECTURE>>` | A `text` fenced ASCII diagram of the implementation architecture, ending with the legend line `* = changed in this PR`. |
+| `<<ATTENTION_POINTS>>` | A `> [!WARNING]` alert with merge blockers and temporary pins (only if any), then bullets: `**Risk:**` (one-way or two-way door; blast radius narrow / moderate / wide), what a reviewer or deployer must know (ordering, migrations, flags, behavior changes), `**Evidence:**` (before vs after, plus the verify command and its result), `**Unverified / gaps:**`. |
+| `<<MANUAL_STEPS>>` | Each human ticket (`kind` human) that this repo's tickets are blocked by or related to, as `- <ref> - <title> (done by human: <note or link>)`; the note is the ticket's `human_note`. A human ticket not yet done also goes into the WARNING alert as a merge blocker. Ship still opens the drafts. |
+| `<<SHIPS_WITH>>` | `Merge together with: <org>/<repo>#<n>, ...` from `kinetic.gitops.ships_with_groups(state)` (a function, no CLI: run it with `python3 -c`; the other repos in this repo's group, as their PRs are known). Every PR in a group gets the same line, also as a line in the WARNING alert. |
+| `<<RELATED_PRS>>` | See "Depends on and Related PRs". |
+| `<<DEPENDS_ON>>` | See "Depends on and Related PRs". |
 
-#### Architecture
-```text
-<ASCII diagram of the implementation architecture>
-* = changed in this PR
-```
+Unknown `<<NAME>>` placeholders stay as they are and are listed in the ship report. A section whose placeholder fills empty is dropped together with its heading.
 
-### Attention points:
-> [!WARNING]
-> <merge blockers and temporary pins, only if any: what must happen before merge>
-
-- **Risk:** <one-way or two-way door; blast radius narrow / moderate / wide>
-- <what a reviewer or deployer must know: ordering, migrations, flags, behavior changes>
-- **Evidence:** <before vs after, plus the verify command and its result>
-- **Unverified / gaps:** <what is not covered or not known>
-
-### Related PRs:
-<<RELATED_PRS>>
-
-### Depends on:
-<<DEPENDS_ON>>
-````
+The section order is the template's, fixed so reviewers read every PR of a run the same way. If the repo has `.github/pull_request_template.md` with extra sections worth keeping (a checklist), keep them after Description. Use the user's domain language from `<dir>/docs/GLOSSARY.md` (or the repo's `GLOSSARY.md`).
 
 ### Writing rules
 
 - **For developers, concisely.** No coding details: no lists of files, classes touched or renamed variables; the diff shows that. Name a class or method only when it is an entry point or seam someone must know to follow the flow.
-- **Tickets**: one line per ticket merged into this repo. Jira mode: the Jira key and summary. Local mode: the ticket id and its title from `<dir>/issues/<id>.md`.
+- **Tickets**: one line per ticket merged into this repo, each reference and title as the tracker adapter's "ticket reference" operation gives it. Do not branch on Jira or local mode.
+- **Manual steps and Ships with**: data the skill fills, never invented. A human ticket without a recorded note shows `(done by human)` alone; one not done is listed as open and as a merge blocker.
 - **Design decisions**: where a responsibility was placed, sync vs async, new vs reused abstraction, contract or schema shape, backward compatibility, flag vs hard switch, failure isolation. Skip a decision with no real alternative; omit the subsection for a trivial change.
 - **Architecture (always included)**: a plain ASCII diagram in a `text` fence of the components this change touches, how they connect (calls, events, data reads) and the key methods or messages on the links. At most about 15 lines and 80 columns. Mark what this PR changes with `*` and keep the legend line. Show sibling repos where they sit on the other side of a link. For a flow, put its direction on the links rather than drawing a second diagram. For a small change, draw just the changed component and its neighbors. Every box and link must come from the diff or the repo; an inferred link goes under Unverified / gaps.
 - **Attention points**: the alert holds merge blockers only: a downstream repo pinned to an upstream snapshot (`kinetic.gitops pin`) that must move to a released version, an upstream PR that must merge first. Risk: a two-way door can be walked back, a one-way door (destructive or hard to reverse) cannot; the blast radius is the scope of impact, such as consumer breakage or a pinned downstream repo. Evidence comes from the run's `verify` records and logs: the command, exit code and test counts as recorded, and the failing-then-passing test where the tickets show one. Never invent counts. Other bullets only when they change how someone reviews, merges or deploys: migrations and rollback, deploy ordering, incompatible contract changes, new config or flags and their defaults, behavior differences between environments.
