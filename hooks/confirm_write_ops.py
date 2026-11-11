@@ -5,8 +5,8 @@ import re
 
 import _common
 
-TOKEN = re.compile(r"&&|\|\||[;&|]|[^\s'\"()&;|`$]+")
-SEPARATORS = {"&&", "||", ";", "&", "|"}
+TOKEN = re.compile(r"&&|\|\||[;&|\n]|[^\s'\"()&;|`$]+")
+SEPARATORS = {"&&", "||", ";", "&", "|", "\n"}
 NON_PUSH = {"status", "diff", "log", "show", "add", "commit", "checkout", "switch", "branch", "fetch",
             "pull", "merge", "rebase", "worktree", "rev-parse", "rev-list", "config", "stash", "tag",
             "remote", "init", "clone", "restore", "reset", "grep", "ls-files", "blame", "cherry-pick",
@@ -76,7 +76,7 @@ def main(inp):
         if r:
             _common.pre_tool(*r)
         return
-    if BRANCH_WRITES.search(name) and _is_protected(str(ti.get("branch") or "")):
+    if BRANCH_WRITES.search(name) and _protected_arg(str(ti.get("branch") or "")):
         _common.pre_tool("deny", f"{name} on protected branch '{ti.get('branch')}' is not allowed")
         return
     _common.pre_tool("ask", f"{name} changes an external system; confirm with the user first")

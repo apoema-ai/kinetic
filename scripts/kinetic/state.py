@@ -139,13 +139,16 @@ def record_edit(run_dir, path: str) -> None:
             rp = os.path.realpath(repo["path"])
             if real == rp or real.startswith(rp + os.sep):
                 repo["last_edit_at"] = _now()
+                repo.pop("last_edit_ticket", None)
                 return
-        for t in state["tickets"].values():
+        for tid, t in state["tickets"].items():
             wt = t.get("worktree")
             if wt and t.get("repo"):
                 rp = os.path.realpath(wt)
                 if real == rp or real.startswith(rp + os.sep):
-                    state["repos"].setdefault(t["repo"], {})["last_edit_at"] = _now()
+                    r = state["repos"].setdefault(t["repo"], {})
+                    r["last_edit_at"] = _now()
+                    r["last_edit_ticket"] = tid  # so the gate hint can name the ticket worktree
                     return
         rd = os.path.realpath(run_dir)
         if real == rd or real.startswith(rd + os.sep):
@@ -182,9 +185,9 @@ def _parse_field(kv: str):
     k, sep, v = kv.partition("=")
     if not sep or not k:
         raise ValueError(f"invalid --field '{kv}': expected KEY=VALUE")
-    if v[:1] in ("[", "{") or (k == "snapshot_published" and v in ("true", "false")):
+    if v[:1] in ("[", "{") or (k == "snapshot_published" and v.lower() in ("true", "false")):
         try:
-            return k, json.loads(v)
+            return k, json.loads(v.lower() if k == "snapshot_published" else v)
         except ValueError:
             raise ValueError(f"invalid JSON for field '{k}': {v}")
     return k, v

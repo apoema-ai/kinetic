@@ -82,6 +82,17 @@ class MergeTests(unittest.TestCase):
             gitops.create_worktree(self.repo, Path(self.tmp.name) / "wt3", "x", "nope")
 
 
+    def test_integration_and_ticket_worktrees_coexist(self):  # C1: build-loop branch names
+        integ = Path(self.tmp.name) / "wt-int"
+        gitops.create_worktree(self.repo, integ, "kinetic/r1/integration", "main")
+        tick = Path(self.tmp.name) / "wt-t1"
+        gitops.create_worktree(integ, tick, "kinetic/r1/T1", "kinetic/r1/integration")
+        self.assertTrue((tick / "a.txt").exists())
+        commit_file(tick, "b.txt", "x\n", "t1")
+        self.assertEqual(gitops.merge_ticket(integ, "kinetic/r1/T1", "kinetic/r1/integration"),
+                         {"merged": True, "conflicts": []})
+
+
 class MergeOrderTests(unittest.TestCase):
     def test_merge_order_respects_edges(self):
         tickets = {

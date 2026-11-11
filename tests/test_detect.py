@@ -26,6 +26,10 @@ class ProposeTest(unittest.TestCase):
         (self.d / "Makefile").write_text("build:\n\techo\ntest:\n\techo\n")
         self.assertEqual(propose(self.d), {"verify": "make test", "marker": "Makefile"})
 
+    def test_pyproject_proposes_python3(self):
+        (self.d / "pyproject.toml").write_text("[project]\n")
+        self.assertEqual(propose(self.d)["verify"], "python3 -m pytest")
+
     def test_first_match_wins(self):
         (self.d / "package.json").write_text("{}")
         (self.d / "pom.xml").write_text("<project/>")

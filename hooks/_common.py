@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 try:
     from kinetic import state
-except ImportError:  # PreToolUse hooks fail closed via run(); others stay silent
+except Exception:  # PreToolUse hooks fail closed via run(); others stay silent
     state = None
 
 

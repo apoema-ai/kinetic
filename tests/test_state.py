@@ -228,6 +228,13 @@ class CliTest(unittest.TestCase):
         r = self.cli("set-ticket", "--id", "T1", "--field", "noequals")
         self.assertNotEqual(r.returncode, 0)
 
+    def test_snapshot_published_boolean_case_insensitive(self):
+        self.cli("init", "--lane", "epic", "--ref", "E")
+        for raw, want in (("False", False), ("TRUE", True), ("false", False)):
+            r = self.cli("set-ticket", "--id", "T1", "--field", f"snapshot_published={raw}")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIs(state.load(self.run_dir)["tickets"]["T1"]["snapshot_published"], want)
+
     def test_invalid_boolean_rejected(self):
         self.cli("init", "--lane", "epic", "--ref", "E")
         r = self.cli("record-gate", "--gate", "ship", "--approved", "ture")

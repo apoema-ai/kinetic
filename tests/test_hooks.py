@@ -79,6 +79,21 @@ class StopGate(HookCase):
         self.stamp(repo_edit=T3)
         self.assertIsNone(self.hook("completion_gate", {"stop_hook_active": True}))
 
+    def test_stop_hint_names_ticket_worktree_for_ticket_edit(self):  # I1
+        self.activate()
+        wt = self.run_dir / "worktrees" / "api-T-1"
+        wt.mkdir(parents=True)
+        state.set_ticket(self.run_dir, "T-1", repo="api", status="done", worktree=str(wt))
+        self.hook("record_edit", {"tool_input": {"file_path": str(wt / "a.py")}})
+        out = self.hook("completion_gate", {})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn(f"--repo-path {wt}", out["reason"])
+        self.assertIn("--ticket T-1", out["reason"])
+        self.hook("record_edit", {"tool_input": {"file_path": str(self.repo / "b.py")}})
+        out = self.hook("completion_gate", {})
+        self.assertIn(f"--repo-path {self.repo}", out["reason"])
+        self.assertNotIn("--ticket", out["reason"])
+
     def test_stop_skips_repo_with_running_ticket(self):
         self.activate()
         state.set_ticket(self.run_dir, "T-1", repo="api", status="running")
@@ -209,6 +224,12 @@ class Confirm(HookCase):
         self.assertEqual(self.bash("bash -c 'gh pr merge 3'"), "ask")
         self.assertEqual(self.bash("git push origin x && git checkout main"), "ask")
 
+    def test_newline_is_a_command_separator(self):  # C2
+        self.assertEqual(self.bash("git push -u origin kinetic/r1/integration\n"
+                                   "gh pr create --draft --base main --head kinetic/r1/integration"), "ask")
+        self.assertEqual(self.bash("git push origin feature\ngit checkout main"), "ask")
+        self.assertEqual(self.bash("git push origin main\ngit status"), "deny")
+
     def test_readonly_git_on_protected_names_not_denied(self):
         for cmd in ("git merge-base main HEAD", "git ls-remote origin main", "git cat-file -p main",
                     "git show-ref main", "git for-each-ref refs/heads/main", "git rm -r main",
@@ -230,6 +251,7 @@ class Confirm(HookCase):
         self.assertEqual(self.mcp("mcp__github-server__push_files", branch="main"), "deny")
         self.assertEqual(self.mcp("mcp__github-server__create_or_update_file", branch="Release-2"), "deny")
         self.assertEqual(self.mcp("mcp__github-server__push_files", branch="feat/x"), "ask")
+        self.assertEqual(self.mcp("mcp__github-server__push_files", branch="refs/heads/main"), "deny")  # M3
 
     def test_matchers_cover_real_tools(self):
         import re
@@ -238,7 +260,9 @@ class Confirm(HookCase):
         for n in ("mcp__plugin_atlassian_atlassian__addOrEditJiraIssueComment",
                   "mcp__plugin_atlassian_atlassian__executeWrite",
                   "mcp__plugin_atlassian_atlassian__executeDestructive",
-                  "mcp__github-server__push_files", "mcp__github-server__delete_file", "Bash"):
+                  "mcp__github-server__push_files", "mcp__github-server__delete_file",
+                  "mcp__github-server__update_pull_request_branch",
+                  "mcp__github-server__create_pull_request_review", "Bash"):
             self.assertTrue(re.fullmatch(m, n), n)
 
     def test_import_failure_fails_closed(self):
@@ -290,9 +314,10 @@ class RecordEditAndOrient(HookCase):
 
     def test_orient_collapses_whitespace(self):
         self.activate()
-        state.set_ticket(self.run_dir, "T-1", repo="api", status="needs_decision")
+        state.set_ticket(self.run_dir, "T\n1", repo="api", status="needs_decision")
         text = self.hook("orient", {})["hookSpecificOutput"]["additionalContext"]
-        self.assertLessEqual(len(text.splitlines()), 5)
+        self.assertEqual(len(text.splitlines()), 5)
+        self.assertIn("ticket T 1 needs", text)
 
     def test_record_edit_noop_without_run(self):
         self.assertIsNone(self.hook("record_edit", {"tool_input": {"file_path": "/x"}}))

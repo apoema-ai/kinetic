@@ -12,7 +12,7 @@ MARKERS = (
     ("package.json", "npm test"),
     ("go.mod", "go test ./..."),
     ("Cargo.toml", "cargo test"),
-    ("pyproject.toml", "python -m pytest"),
+    ("pyproject.toml", "python3 -m pytest"),
 )
 
 

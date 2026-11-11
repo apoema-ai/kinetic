@@ -11,7 +11,7 @@
     "PreToolUse": [
       {"matcher": "Write|Edit|MultiEdit|NotebookEdit",
        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/isolation.py\"", "timeout": 10}]},
-      {"matcher": "Bash|mcp__.*atlassian.*(create|edit|Edit|update|transition|[Cc]omment|executeWrite|executeDestructive).*|mcp__.*github.*(create_pull_request|merge_pull_request|update_pull_request|push_files|create_or_update_file|create_branch|delete_file)",
+      {"matcher": "Bash|mcp__.*atlassian.*(create|edit|Edit|update|transition|[Cc]omment|executeWrite|executeDestructive).*|mcp__.*github.*(create_pull_request|merge_pull_request|update_pull_request|push_files|create_or_update_file|create_branch|delete_file).*",
        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/confirm_write_ops.py\"", "timeout": 10}]},
       {"matcher": "mcp__.*deploy.*|mcp__.*tekton.*trigger.*",
        "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/confirm_deploy.py\"", "timeout": 10}]}

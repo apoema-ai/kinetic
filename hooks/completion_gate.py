@@ -30,19 +30,22 @@ def main(inp):
                             for t in st.get("tickets", {}).values()):
             continue
         if _stale(stamp, _newest([v for v in verifies if v.get("repo") == name])):
-            bad.append((name, repo.get("path")))
+            tid = repo.get("last_edit_ticket")
+            wt = st.get("tickets", {}).get(tid, {}).get("worktree") if tid else None
+            bad.append((name, wt or repo.get("path"), tid if wt else None))
     top = st.get("last_edit_at")
     if top and _stale(top, _newest(verifies)):
-        bad.append(("(outside registered repos)", None))
+        bad.append(("(outside registered repos)", None, None))
     if not bad:
         return
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     lines = []
-    for name, path in bad:
+    for name, path, tid in bad:
         if path:
             lines.append(f"{name}: PYTHONPATH={shlex.quote(root + '/scripts')} python3 -m kinetic.verify "
                          f"--run {shlex.quote(str(run_dir))} --repo-name {shlex.quote(name)} "
-                         f"--repo-path {shlex.quote(path)}")
+                         f"--repo-path {shlex.quote(path)}"
+                         + (f" --ticket {shlex.quote(tid)}" if tid else ""))
         else:
             lines.append(f"{name}: run verify for the repo you edited")
     print(json.dumps({"decision": "block", "reason":
