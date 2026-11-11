@@ -11,6 +11,7 @@ from kinetic import config
 
 SKILLS = ["find-ticket-repos", "checkout-ticket-repos", "resolving-merge-conflicts"]
 PLUGINS = ["superpowers", "dev-fleet"]
+GH_TIMEOUT = 10
 
 
 def _r(name: str, status: str, fix: str = "") -> dict:
@@ -39,16 +40,27 @@ def checks(repos: list[tuple[str, str]], home: Path | None = None,
         out.append(_r(tool, "pass") if found else _r(tool, "fail", f"install {tool} and put it on PATH"))
     if shutil.which("gh"):
         try:
-            code = subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=10).returncode
-        except (subprocess.TimeoutExpired, OSError):
-            code = 1
-        out.append(_r("gh-auth", "pass") if code == 0 else _r("gh-auth", "fail", "run: gh auth login"))
-    out.append(_central_check(central))
+            code = subprocess.run(["gh", "auth", "status", "--hostname", "github.com"],
+                                  capture_output=True, timeout=GH_TIMEOUT).returncode
+            fix = "run: gh auth login"
+        except subprocess.TimeoutExpired:
+            code, fix = 1, f"gh auth status timed out after {GH_TIMEOUT}s"
+        except OSError as e:
+            code, fix = 1, f"could not run gh auth status: {e}"
+        out.append(_r("gh-auth", "pass") if code == 0 else _r("gh-auth", "fail", fix))
+    central_res = _central_check(central)
+    out.append(central_res)
     for name, path in repos:
+        if central_res["status"] == "fail":
+            out.append(_r(f"verify:{name}", "fail", "fix central-config first"))
+            continue
+        if not Path(path).is_dir():
+            out.append(_r(f"verify:{name}", "fail", f"repo path not found: {path}"))
+            continue
         try:
             config.resolve(name, Path(path), central)
             out.append(_r(f"verify:{name}", "pass"))
-        except (config.ConfigError, ValueError, OSError, AttributeError) as e:
+        except (config.ConfigError, OSError) as e:
             out.append(_r(f"verify:{name}", "fail", str(e)))
     for s in SKILLS:
         ok = (home / ".claude/skills" / s / "SKILL.md").is_file()

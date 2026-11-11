@@ -41,6 +41,30 @@ class ResolveTest(unittest.TestCase):
             f"no verify command for repo 'svc': set it in {self.central} or {self.repo}/.kinetic.json",
         )
 
+    def _raw(self, path, text):
+        path.write_text(text)
+
+    def test_malformed_config_raises_config_error(self):
+        repo_file = self.repo / ".kinetic.json"
+        cases = [
+            (self.central, "{bad", str(self.central)),
+            (self.central, "[]", str(self.central)),
+            (self.central, '{"svc": "x"}', "svc"),
+            (self.central, '{"svc": null}', "svc"),
+            (repo_file, "{bad", str(repo_file)),
+            (repo_file, "[]", str(repo_file)),
+            (repo_file, '"x"', str(repo_file)),
+        ]
+        for path, text, needle in cases:
+            for f in (self.central, repo_file):
+                if f.exists():
+                    f.unlink()
+            self._raw(path, text)
+            with self.assertRaises(ConfigError, msg=text) as ctx:
+                resolve("svc", self.repo, self.central)
+            self.assertIn(needle, str(ctx.exception))
+            self.assertIn(str(path), str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
