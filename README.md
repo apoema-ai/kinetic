@@ -16,6 +16,7 @@ It merges ideas from three plugins: Matt Pocock's skills (grill, spec, tickets, 
 - [Quick start](#quick-start)
 - [How a run flows](#how-a-run-flows)
 - [Lanes and entry points](#lanes-and-entry-points)
+- [Example runs](#example-runs)
 - [Approval gates](#approval-gates)
 - [The build loop](#the-build-loop)
 - [Ship: what the PRs look like](#ship-what-the-prs-look-like)
@@ -48,7 +49,7 @@ Optional companions that kinetic uses when present and falls back without: the `
 2. `/kinetic:run "let partners export statements as CSV"` (or a Jira key, or a path to a spec) starts a run. kinetic picks a lane, says why in one line, and lets you override it.
 3. Answer the grill questions, approve the spec, approve the ticket breakdown. From there implementers work in the background; you are asked only when one needs a decision.
 4. Approve the ship gate. kinetic pushes the integration branches and opens one draft PR per repo, in merge order.
-5. The retro writes the run's lessons, a runbook and release notes under the run directory.
+5. The retro presents improvement candidates and drafts a runbook and release notes under the run directory.
 
 At any point `/kinetic:status` shows where the run is, and `/kinetic:ask` prints the next step.
 
@@ -102,6 +103,73 @@ A run starts at the first missing artifact:
 | One small ticket, no spec | the quick lane |
 
 A spec brought in from outside still goes through the spec gate, and tickets brought in still go through the breakdown gate. `--from build` (and `/kinetic:implement <ref>`) skips straight to build for an already specified ticket; the breakdown gate still applies.
+
+## Example runs
+
+These walk through one run per lane. Repo names, ticket text and commands are illustrative; the phases, gates, ids, branches and paths follow what kinetic does. Each example assumes local tracker mode and `workspace_root` `~/workspace/kinetic-runs`, so the run directory is `~/workspace/kinetic-runs/<run-id>/`.
+
+### Quick lane: one small fix in one repo
+
+```
+/kinetic:run "api: reject statement exports with an end date before the start date"
+```
+
+1. **Intake.** kinetic finds one repo in play (`api`) and no design decisions: "quick lane: one small ticket in api, no spec needed." You can override it. Run id: `reject-inverted-export-dates-2026-11-11`.
+2. **Breakdown gate (one question).** kinetic registers the single ticket `01-api-reject-inverted-dates` with no blockers and asks you to approve it. The question spells out the grant and asks which test seams the implementer may use, for example "the export request validator, through its public validate method". Your answer goes into `issues/01-api-reject-inverted-dates.md`.
+3. **Build.** The integration worktree `worktrees/api` is created on branch `kinetic/<run-id>/integration`. The ticket gets `worktrees/api-01-api-reject-inverted-dates` on `kinetic/<run-id>/01-api-reject-inverted-dates`. One implementer writes the failing test, the fix and runs `mvn -q verify`, then reports `DONE`. The spec and standards reviewers check the diff, and the ticket merges into the integration branch.
+4. **Review.** Architecture and security review run on `api` if those skills are installed. `api` is verified again.
+5. **Ship gate, then ship.** You see the branch, base `main` and the passing verify. On approve, kinetic opens one draft PR in `api`, titled `<run-id>: <title>` (local mode has no Jira key).
+6. **Retro.** It presents improvement candidates for the repo and its checks, ordered by severity, and drafts `docs/runbook.md` and `docs/release-notes.md` for you to review.
+
+Starting from a ticket file instead: `/kinetic:implement ~/notes/fix-dates.md` registers that one ticket and copies the file to `issues/` before dispatch.
+
+### Feature lane: one repo, needs a spec
+
+```
+/kinetic:run "web: let partners download their monthly statement as CSV"
+```
+
+1. **Intake.** One repo (`web`), but there are design choices to settle, so: "feature lane: one repo, needs a spec."
+2. **Grill.** An interview, one question at a time: which partners can download, which columns, how large a month gets, what must never appear in the file (threat model), how fast it must be (non-functional requirements). Agreed terms go into `docs/GLOSSARY.md`; a hard-to-reverse choice, such as "generate on request rather than nightly", becomes an ADR draft in `docs/adr/0001-on-request-csv.md`.
+3. **Spec, then spec gate.** `spec.md` is written and must pass `spec_lint` (non-empty Threat model, Non-functional requirements and Acceptance criteria sections). You approve it, or revise and see it again.
+4. **Tickets, then breakdown gate.** Two vertical slices, each a ticket in `web`:
+   - `01-web-csv-endpoint`, no blockers;
+   - `02-web-download-button`, blocked by `01-web-csv-endpoint` with a `merge` edge.
+
+   `graph validate` must be clean before you see the list and approve the grant.
+5. **Build.** Round 1 dispatches only `01-web-csv-endpoint` (one implementer per repo at a time). After it is reviewed and merged, round 2 cuts the worktree for `02-web-download-button` from the integration branch, so it already contains the endpoint.
+6. **Review, ship gate, ship, retro.** As in the quick lane: one draft PR in `web`, whose body lists both tickets.
+
+### Epic lane: several repos with typed edges
+
+```
+/kinetic:run INV-4321
+```
+
+Here the tracker is Jira, so ticket ids are Jira keys and the run id is `INV-4321`.
+
+1. **Intake.** kinetic reads the Jira issue and detects three repos: `statement-client` (a library), `api` and `web`. "Epic lane: three repos."
+2. **Grill and spec.** As in the feature lane, but the spec also covers how the repos interact. It is published as a Jira issue under project `INV`, and its key is noted at the top of `spec.md`. Spec gate.
+3. **Tickets, then breakdown gate.** One slice, with one child ticket per repo, linked with Jira "blocks" links and edge labels:
+
+   | Ticket | Repo | Blocked by |
+   |---|---|---|
+   | INV-4322 | statement-client | none |
+   | INV-4323 | api | INV-4322 (`snapshot`) |
+   | INV-4324 | web | INV-4323 (`merge`) |
+
+   The `snapshot` edge is allowed because `statement-client` has `publish_snapshot` and `api` has `pin` in `repos.json`. Without them, the tickets phase would use a `merge` edge. You approve the breakdown and the grant.
+4. **Build.** Each repo gets its own integration branch `kinetic/INV-4321/integration`.
+   - Round 1: only `INV-4322` is ready. Its implementer adds the client method. After review it merges into `statement-client`'s integration branch, and `kinetic.gitops pin` publishes the snapshot and pins `api` to it.
+   - Round 2: `INV-4323` is ready. Its worktree is cut from `api`'s integration branch, which now carries the pin, so the implementer builds against the new client.
+   - Round 3: once `INV-4323` merges into `api`'s integration branch, `INV-4324` starts in `web`.
+
+   If an implementer returns `NEEDS_DECISION` (say, "paginate the export or stream it?"), you answer once. The answer is recorded as a ruling and the same implementer resumes.
+5. **Review.** Architecture and security review per repo. A confirmed finding in `api` becomes the fix ticket `api-review-1`, built through the same loop. Every changed repo is verified again.
+6. **Ship gate, then ship.** The merge order is `statement-client, api, web`. kinetic opens three draft PRs in that order, titled `INV-4321: <title>`. `api`'s PR lists the `statement-client` PR under Depends on, and has a warning that its snapshot pin must move to a released version before merge. After the last PR exists, the first two are updated so their Related PRs list all three.
+7. **Retro.** The runbook gives the rollout and rollback order across the three repos. The release notes call out the pin and the new client version.
+
+Starting from an existing spec instead: `/kinetic:run ~/specs/csv-export.md` starts at tickets (repo detection first), after the spec gate.
 
 ## Approval gates
 
