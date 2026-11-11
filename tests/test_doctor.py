@@ -120,6 +120,7 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(c["verify:svc"]["status"], "fail")
         out = io.StringIO()
         with mock.patch.object(doctor.config, "DEFAULT_CENTRAL", self.central), \
+                mock.patch.object(doctor.tracker, "DEFAULT_SETTINGS", self.settings), \
                 mock.patch.object(doctor.Path, "home", return_value=self.home), \
                 contextlib.redirect_stdout(out):
             code = doctor.main(["--repo", f"svc={self.repo}"])
@@ -141,6 +142,7 @@ class DoctorTest(unittest.TestCase):
         self.central.write_text("{}")
         out = io.StringIO()
         with mock.patch.object(doctor.config, "DEFAULT_CENTRAL", self.central), \
+                mock.patch.object(doctor.tracker, "DEFAULT_SETTINGS", self.settings), \
                 mock.patch.object(doctor.Path, "home", return_value=self.home), \
                 contextlib.redirect_stdout(out):
             code = doctor.main(["--repo", f"svc={self.repo}"])
@@ -194,6 +196,7 @@ class DoctorTest(unittest.TestCase):
         (self.repo / ".kinetic.json").unlink()
         out = io.StringIO()
         with mock.patch.object(doctor.config, "DEFAULT_CENTRAL", self.central), \
+                mock.patch.object(doctor.tracker, "DEFAULT_SETTINGS", self.settings), \
                 mock.patch.object(doctor.Path, "home", return_value=self.home), \
                 contextlib.redirect_stdout(out):
             code = doctor.main(["--repo", f"svc={self.repo}"])

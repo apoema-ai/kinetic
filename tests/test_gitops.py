@@ -124,6 +124,14 @@ class MergeOrderTests(unittest.TestCase):
         }
         self.assertEqual(gitops.merge_order({"tickets": tickets}), ["a", "z", "b"])
 
+    def test_merge_order_blocker_beats_ships_with(self):
+        tickets = {
+            "A": {"repo": "a", "blocked_by": [], "ships_with": "g"},
+            "B": {"repo": "b", "blocked_by": []},
+            "Z": {"repo": "z", "blocked_by": [{"id": "B", "type": "merge"}], "ships_with": "g"},
+        }
+        self.assertEqual(gitops.merge_order({"tickets": tickets}), ["a", "b", "z"])
+
     def test_ships_with_groups(self):
         tickets = {
             "A": {"repo": "z", "blocked_by": [], "ships_with": "g"},
