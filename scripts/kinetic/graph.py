@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import heapq
 import json
 import sys
 
@@ -18,16 +17,18 @@ def topo_order(tickets: dict) -> list:
         for b in {e["id"] for e in t["blocked_by"] if e["id"] in tickets}:
             indeg[i] += 1
             blocks[b].append(i)
-    ready = [i for i, d in indeg.items() if d == 0]
-    heapq.heapify(ready)
-    order = []
-    while ready:
-        i = heapq.heappop(ready)
+    after = {i: [x for x in state.field(t, "after") if x in tickets] for i, t in tickets.items()}
+    order, placed = [], set()
+    while len(order) < len(tickets):
+        ready = sorted(i for i in tickets if i not in placed and indeg[i] == 0)
+        if not ready:
+            break
+        # soft tie-break: prefer tickets whose `after` targets are placed; a soft cycle falls back to smallest id
+        i = next((r for r in ready if all(x in placed for x in after[r])), ready[0])
         order.append(i)
+        placed.add(i)
         for n in blocks[i]:
             indeg[n] -= 1
-            if indeg[n] == 0:
-                heapq.heappush(ready, n)
     if len(order) != len(tickets):
         stuck = sorted(set(tickets) - set(order))
         raise ValueError("dependency cycle among tickets: " + ", ".join(stuck))
@@ -43,6 +44,22 @@ def _upstream(tickets: dict, tid: str) -> set:
                 seen.add(e["id"])
                 stack.append(e["id"])
     return seen
+
+
+def soft_warnings(tickets: dict) -> list:
+    """Tickets whose `after` links lead back to themselves."""
+    after = {i: [x for x in state.field(t, "after") if x in tickets] for i, t in tickets.items()}
+    cyc = []
+    for i in sorted(tickets):
+        seen, stack = set(), list(after[i])
+        while stack:
+            x = stack.pop()
+            if x not in seen:
+                seen.add(x)
+                stack.extend(after[x])
+        if i in seen:
+            cyc.append(i)
+    return ["soft precedence cycle among: " + ", ".join(cyc)] if cyc else []
 
 
 def interface_issues(tickets: dict) -> dict:
@@ -71,14 +88,29 @@ def validate(tickets: dict, lane: str, slices: list | None = None) -> list:
     # lane is accepted per the interface; the brief gives it no behaviour.
     errors = []
     for i, t in sorted(tickets.items()):
-        if not t.get("repo"):
+        if state.field(t, "kind") != "human" and not t.get("repo"):
             errors.append(f"ticket {i}: missing repo")
+        for x in state.field(t, "after"):
+            if x not in tickets:
+                errors.append(f"ticket {i}: unknown after '{x}'")
+            elif i in _upstream(tickets, x):
+                errors.append(f"ticket {i}: after '{x}' contradicts blocks")
+        for x in state.field(t, "related"):
+            if x not in tickets:
+                errors.append(f"ticket {i}: unknown related '{x}'")
         for e in t["blocked_by"]:
             if e["type"] not in EDGE_TYPES:
                 errors.append(f"ticket {i}: invalid edge type '{e['type']}' on blocker {e['id']} "
                               f"(expected one of {EDGE_TYPES})")
             if e["id"] not in tickets:
                 errors.append(f"ticket {i}: unknown blocker '{e['id']}'")
+    groups = {}
+    for i, t in sorted(tickets.items()):
+        if state.field(t, "ships_with"):
+            groups.setdefault(state.field(t, "ships_with"), []).append(i)
+    for g, members in sorted(groups.items()):
+        if len(members) == 1:
+            errors.append(f"ships_with group '{g}' has one ticket ({members[0]})")
     used = {t.get("slice") for t in tickets.values()}
     for s in slices or []:
         if s not in used:
@@ -100,7 +132,8 @@ def main(argv=None) -> int:
         if a.cmd == "validate":
             errors = validate(s["tickets"], s["lane"], s.get("slices"))
             print(json.dumps({"errors": errors,
-                              "warnings": interface_issues(s["tickets"])["warnings"]}))
+                              "warnings": interface_issues(s["tickets"])["warnings"]
+                              + soft_warnings(s["tickets"])}))
             return 1 if errors else 0
         print(json.dumps({"order": topo_order(s["tickets"])}))
     except (ValueError, OSError, KeyError) as e:

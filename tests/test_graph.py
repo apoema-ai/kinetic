@@ -87,5 +87,53 @@ class GraphTest(unittest.TestCase):
             graph.topo_order(tickets)
 
 
+class SoftLinksTest(unittest.TestCase):
+    def test_after_breaks_ties(self):
+        tickets = {"A": t(), "B": t()}
+        tickets["A"]["after"] = ["B"]
+        self.assertEqual(graph.topo_order(tickets), ["B", "A"])
+
+    def test_after_never_overrides_blocks(self):
+        tickets = {"A": t(), "B": t(blocked_by=[("A", "merge")]), "C": t()}
+        tickets["A"]["after"] = ["C"]
+        order = graph.topo_order(tickets)
+        self.assertLess(order.index("A"), order.index("B"))
+        self.assertLess(order.index("C"), order.index("A"))
+
+    def test_after_cycle_does_not_raise(self):
+        tickets = {"A": t(), "B": t()}
+        tickets["A"]["after"] = ["B"]
+        tickets["B"]["after"] = ["A"]
+        self.assertEqual(graph.topo_order(tickets), ["A", "B"])
+        warnings = graph.soft_warnings(tickets)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("soft precedence cycle", warnings[0])
+
+    def test_human_ticket_needs_no_repo(self):
+        tickets = {"H": t(repo=None)}
+        tickets["H"]["kind"] = "human"
+        self.assertEqual(graph.validate(tickets, "epic"), [])
+
+    def test_unknown_after_and_related(self):
+        tickets = {"A": t()}
+        tickets["A"]["after"] = ["X"]
+        tickets["A"]["related"] = ["Y"]
+        errors = graph.validate(tickets, "epic")
+        self.assertIn("ticket A: unknown after 'X'", errors)
+        self.assertIn("ticket A: unknown related 'Y'", errors)
+
+    def test_after_contradicts_blocks(self):
+        tickets = {"A": t(), "B": t(blocked_by=[("A", "merge")])}
+        tickets["A"]["after"] = ["B"]
+        errors = graph.validate(tickets, "epic")
+        self.assertIn("ticket A: after 'B' contradicts blocks", errors)
+
+    def test_single_ticket_ships_with_group(self):
+        tickets = {"A": t()}
+        tickets["A"]["ships_with"] = "g1"
+        errors = graph.validate(tickets, "epic")
+        self.assertIn("ships_with group 'g1' has one ticket (A)", errors)
+
+
 if __name__ == "__main__":
     unittest.main()
