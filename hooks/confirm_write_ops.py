@@ -9,7 +9,9 @@ TOKEN = re.compile(r"&&|\|\||[;&|]|[^\s'\"()&;|`$]+")
 SEPARATORS = {"&&", "||", ";", "&", "|"}
 NON_PUSH = {"status", "diff", "log", "show", "add", "commit", "checkout", "switch", "branch", "fetch",
             "pull", "merge", "rebase", "worktree", "rev-parse", "rev-list", "config", "stash", "tag",
-            "remote", "init", "clone", "restore", "reset", "grep", "ls-files", "blame", "cherry-pick"}
+            "remote", "init", "clone", "restore", "reset", "grep", "ls-files", "blame", "cherry-pick",
+            "merge-base", "ls-remote", "cat-file", "show-ref", "for-each-ref", "describe", "rm", "mv",
+            "cherry", "name-rev", "show-branch", "symbolic-ref", "ls-tree", "reflog", "shortlog", "clean"}
 OPT_WITH_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 GH_PR = re.compile(r"\bgh\s+pr\s+(create|merge|edit|ready)\b")
 ANY_PUSH = re.compile(r"\bgit\b[\s\S]*\bpush\b")
@@ -52,6 +54,8 @@ def _git_calls(cmd: str):
 
 
 def classify_bash(cmd: str):
+    # the shell concatenates quoted pieces (gi''t -> git), so drop quote chars before matching
+    cmd = re.sub(r"['\"\\]", "", cmd)
     ask = bool(GH_PR.search(cmd) or ANY_PUSH.search(cmd))
     for sub, args in _git_calls(cmd):
         if sub in NON_PUSH:

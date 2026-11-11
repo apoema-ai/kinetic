@@ -209,6 +209,18 @@ class Confirm(HookCase):
         self.assertEqual(self.bash("bash -c 'gh pr merge 3'"), "ask")
         self.assertEqual(self.bash("git push origin x && git checkout main"), "ask")
 
+    def test_readonly_git_on_protected_names_not_denied(self):
+        for cmd in ("git merge-base main HEAD", "git ls-remote origin main", "git cat-file -p main",
+                    "git show-ref main", "git for-each-ref refs/heads/main", "git rm -r main",
+                    "git describe --all"):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_quote_split_command_word_denied(self):
+        for cmd in ("gi''t push origin main", 'gi""t push origin main', "g\\it push origin main"):
+            self.assertEqual(self.bash(cmd), "deny", cmd)
+        for cmd in ('"gh" pr merge 3', "gh pr 'merge' 3"):
+            self.assertEqual(self.bash(cmd), "ask", cmd)
+
     def mcp(self, name, **inp):
         return self.decision(self.hook("confirm_write_ops", {"tool_name": name, "tool_input": inp}))
 
