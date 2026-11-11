@@ -127,6 +127,19 @@ class StateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             state.set_phase(self.run_dir, "nope")
 
+    def test_set_slices(self):  # R17
+        state.init(self.run_dir, "epic", "E-1")
+        self.assertEqual(state.set_slices(self.run_dir, ["S1", "S2"])["slices"], ["S1", "S2"])
+        self.assertEqual(state.set_slices(self.run_dir, ["S3"])["slices"], ["S3"])
+        self.assertEqual(state.load(self.run_dir)["slices"], ["S3"])
+
+    def test_set_slices_invalid(self):  # R17
+        state.init(self.run_dir, "epic", "E-1")
+        for bad in ("S1", ["S1", ""], ["S1", 2], [None]):
+            with self.assertRaises(ValueError):
+                state.set_slices(self.run_dir, bad)
+        self.assertEqual(state.load(self.run_dir)["slices"], [])
+
     def test_record_edit_routes_by_repo(self):  # R12
         state.init(self.run_dir, "epic", "E-1")
         repo = Path(self._tmp.name) / "repo"
@@ -172,6 +185,15 @@ class CliTest(unittest.TestCase):
         t = state.load(self.run_dir)["tickets"]["T1"]
         self.assertEqual(t["blocked_by"], [{"id": "T0", "type": "merge"}])
         self.assertEqual(t["branch"], "123")
+
+    def test_set_slices_cli(self):  # R17
+        self.cli("init", "--lane", "epic", "--ref", "E")
+        r = self.cli("set-slices", "--slices", '["S1","S2"]')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(state.load(self.run_dir)["slices"], ["S1", "S2"])
+        for bad in ('"S1"', '["S1",""]', "notjson"):
+            self.assertNotEqual(self.cli("set-slices", "--slices", bad).returncode, 0)
+        self.assertEqual(state.load(self.run_dir)["slices"], ["S1", "S2"])
 
     def test_bad_edge_type_and_missing_equals_fail(self):
         self.cli("init", "--lane", "epic", "--ref", "E")

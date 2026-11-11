@@ -74,13 +74,21 @@ Jira issue bodies use the same content (Parent, What to build, Acceptance criter
 
 ### 5. Record in state
 
-For every child ticket (`blocked_by` is a JSON list of `{"id","type"}`; use `[]` when none):
+Ids: a ticket id is the Jira key in jira mode and `NN-<repo>-<slug>` in local mode; a slice id follows the same rule for its parent ticket (Jira key, or `NN-<slug>` for a local parent).
+
+First record the approved slice ids, before any child ticket, so `graph validate`'s slice check is live:
+
+```
+python3 -m kinetic.state set-slices --run <dir> --slices '["<slice-id>","<slice-id>"]'
+```
+
+Then, for every child ticket (`blocked_by` is a JSON list of `{"id","type"}`; use `[]` when none):
 
 ```
 python3 -m kinetic.state set-ticket --run <dir> --id <ticket-id> --field repo=<repo> --field slice=<slice-id> --field 'blocked_by=[{"id":"<blocker-id>","type":"snapshot"}]'
 ```
 
-`state.py` has no command that sets the top-level `slices` list, so record each slice id only in the `slice` field of its tickets. Do not edit `state.json` by hand.
+Every slice id passed to `set-slices` must appear in at least one ticket's `slice` field. Do not edit `state.json` by hand.
 
 ### 6. Validate
 

@@ -79,6 +79,12 @@ def set_phase(run_dir, phase: str) -> dict:
     return _mutate(run_dir, lambda s: s.update(phase=phase))
 
 
+def set_slices(run_dir, slices: list) -> dict:
+    if not isinstance(slices, list) or not all(isinstance(s, str) and s for s in slices):
+        raise ValueError("slices must be a list of non-empty strings")
+    return _mutate(run_dir, lambda s: s.update(slices=list(slices)))
+
+
 def _check_blocked_by(entries) -> None:
     if not isinstance(entries, list):
         raise ValueError("blocked_by must be a list")
@@ -188,6 +194,7 @@ def main(argv=None) -> int:
         ("--force", {"action": "store_true"}))
     cmd("set-phase", ("--phase", {"required": True}))
     cmd("load")
+    cmd("set-slices", ("--slices", {"required": True, "metavar": "JSON_LIST"}))
     cmd("set-ticket", ("--id", {"required": True}),
         ("--field", {"action": "append", "default": [], "metavar": "KEY=VALUE"}))
     cmd("set-repo", ("--name", {"required": True}), ("--path", {"required": True}),
@@ -210,6 +217,8 @@ def main(argv=None) -> int:
             out = set_phase(a.run, a.phase)
         elif a.cmd == "load":
             out = load(a.run)
+        elif a.cmd == "set-slices":
+            out = set_slices(a.run, json.loads(a.slices))
         elif a.cmd == "set-ticket":
             fields = dict(_parse_field(kv) for kv in a.field)
             out = set_ticket(a.run, a.id, **fields)
