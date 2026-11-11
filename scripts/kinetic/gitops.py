@@ -12,6 +12,9 @@ from pathlib import Path
 from kinetic import config, state
 
 
+PUBLISHABLE = ("done", "done_with_concerns", "merged", "released")
+
+
 def _git(repo, *args) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
@@ -29,10 +32,14 @@ def merge_ticket(repo_path, ticket_branch: str, integration_branch: str) -> dict
     co = _git(repo_path, "checkout", integration_branch)
     if co.returncode != 0:
         raise RuntimeError(co.stderr.strip())
-    if _git(repo_path, "merge", "--no-ff", "--no-edit", ticket_branch).returncode == 0:
+    m = _git(repo_path, "merge", "--no-ff", "--no-edit", ticket_branch)
+    if m.returncode == 0:
         return {"merged": True, "conflicts": []}
-    out = _git(repo_path, "diff", "--name-only", "--diff-filter=U").stdout
-    return {"merged": False, "conflicts": sorted(out.split())}
+    out = _git(repo_path, "diff", "--name-only", "-z", "--diff-filter=U").stdout
+    conflicts = sorted(f for f in out.split("\0") if f)
+    if not conflicts:
+        raise RuntimeError(m.stderr.strip() or m.stdout.strip())
+    return {"merged": False, "conflicts": conflicts}
 
 
 def merge_order(st: dict) -> list:
@@ -41,6 +48,8 @@ def merge_order(st: dict) -> list:
     repos = {t["repo"] for t in tickets.values() if t.get("repo")}
     before = {r: set() for r in repos}  # repo -> repos that must come first
     for t in tickets.values():
+        if not t.get("repo"):
+            continue
         for e in t["blocked_by"]:
             b = tickets.get(e["id"])
             if e["type"] in ("merge", "release") and b and b.get("repo") and b["repo"] != t["repo"]:
@@ -63,6 +72,9 @@ def merge_order(st: dict) -> list:
 
 def pin(run_dir, upstream_repo: str, downstream_repo: str, central=None) -> dict:
     repos = state.load(run_dir)["repos"]
+    for name in (upstream_repo, downstream_repo):
+        if name not in repos:
+            raise ValueError(f"repo '{name}' not registered in state")
     up_path, down_path = Path(repos[upstream_repo]["path"]), Path(repos[downstream_repo]["path"])
     central = central or config.DEFAULT_CENTRAL
     publish = config.resolve(upstream_repo, up_path, central)["publish_snapshot"]
@@ -70,7 +82,10 @@ def pin(run_dir, upstream_repo: str, downstream_repo: str, central=None) -> dict
     for name, cmd, key in ((upstream_repo, publish, "publish_snapshot"), (downstream_repo, pin_cmd, "pin")):
         if not cmd:
             return {"ok": False, "log_path": None, "reason": f"{key} command is unset for repo '{name}'"}
-    ref = _git(up_path, "rev-parse", "HEAD").stdout.strip()
+    head = _git(up_path, "rev-parse", "HEAD")
+    ref = head.stdout.strip()
+    if head.returncode != 0 or not ref:
+        raise RuntimeError(head.stderr.strip() or f"cannot resolve HEAD in {up_path}")
     logs = Path(run_dir) / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -84,7 +99,7 @@ def pin(run_dir, upstream_repo: str, downstream_repo: str, central=None) -> dict
                                 stderr=subprocess.STDOUT).returncode == 0
     if ok:
         for tid, t in state.load(run_dir)["tickets"].items():
-            if t["repo"] == upstream_repo:
+            if t["repo"] == upstream_repo and t["status"] in PUBLISHABLE:
                 state.set_ticket(run_dir, tid, snapshot_published=True)
     return {"ok": ok, "log_path": str(log_path)}
 

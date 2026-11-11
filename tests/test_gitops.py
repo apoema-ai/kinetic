@@ -46,6 +46,20 @@ class MergeTests(unittest.TestCase):
         res = gitops.merge_ticket(self.repo, "t1", "main")
         self.assertEqual(res, {"merged": True, "conflicts": []})
         self.assertTrue((self.repo / "b.txt").exists())
+        self.assertEqual(len(git(self.repo, "rev-list", "--parents", "-n", "1", "HEAD").split()), 3)
+
+    def test_merge_missing_branch_raises(self):
+        with self.assertRaises(RuntimeError):
+            gitops.merge_ticket(self.repo, "nope", "main")
+
+    def test_merge_conflict_filename_with_space(self):
+        commit_file(self.repo, "my file.txt", "base\n", "add")
+        git(self.repo, "checkout", "-b", "t1")
+        commit_file(self.repo, "my file.txt", "ticket\n", "t1")
+        git(self.repo, "checkout", "main")
+        commit_file(self.repo, "my file.txt", "main\n", "main")
+        res = gitops.merge_ticket(self.repo, "t1", "main")
+        self.assertEqual(res["conflicts"], ["my file.txt"])
 
     def test_merge_conflict_lists_files(self):
         git(self.repo, "checkout", "-b", "t1")
@@ -78,6 +92,11 @@ class MergeOrderTests(unittest.TestCase):
         }
         self.assertEqual(gitops.merge_order({"tickets": tickets}), ["app", "lib", "web"])
 
+    def test_merge_order_skips_repoless_tickets(self):
+        tickets = {"A": {"repo": None, "blocked_by": []},
+                   "B": {"repo": "x", "blocked_by": [{"id": "A", "type": "merge"}]}}
+        self.assertEqual(gitops.merge_order({"tickets": tickets}), ["x"])
+
     def test_merge_order_cycle(self):
         tickets = {
             "A": {"repo": "x", "blocked_by": [{"id": "B", "type": "merge"}]},
@@ -98,7 +117,8 @@ class PinTests(unittest.TestCase):
         make_repo(self.down)
         state.set_repo(self.run_dir, "up", str(self.up), "main")
         state.set_repo(self.run_dir, "down", str(self.down), "main")
-        state.set_ticket(self.run_dir, "T1", repo="up")
+        state.set_ticket(self.run_dir, "T1", repo="up", status="done")
+        state.set_ticket(self.run_dir, "T3", repo="up")  # todo
         state.set_ticket(self.run_dir, "T2", repo="down")
         self.central = root / "repos.json"
 
@@ -129,6 +149,22 @@ class PinTests(unittest.TestCase):
         s = state.load(self.run_dir)
         self.assertTrue(s["tickets"]["T1"]["snapshot_published"])
         self.assertFalse(s["tickets"]["T2"]["snapshot_published"])
+        self.assertFalse(s["tickets"]["T3"]["snapshot_published"])  # todo stays unmarked
+
+    def test_pin_non_git_upstream_raises(self):
+        plain = Path(self.tmp.name) / "plain"
+        plain.mkdir()
+        state.set_repo(self.run_dir, "up", str(plain), "main")
+        self.write_central({"verify": "true", "publish_snapshot": "touch published"},
+                           {"verify": "true", "pin": "true"})
+        with self.assertRaises(RuntimeError):
+            gitops.pin(self.run_dir, "up", "down", central=self.central)
+        self.assertFalse((plain / "published").exists())
+        self.assertFalse(state.load(self.run_dir)["tickets"]["T1"]["snapshot_published"])
+
+    def test_pin_unregistered_repo(self):
+        with self.assertRaises(ValueError):
+            gitops.pin(self.run_dir, "up", "ghost", central=self.central)
 
     def test_pin_failure_does_not_mark(self):
         self.write_central({"verify": "true", "publish_snapshot": "true"},
