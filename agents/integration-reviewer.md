@@ -2,6 +2,7 @@
 name: integration-reviewer
 description: Read-only final review of a kinetic run's integrated result, every repo's integration branch against its base, focused on cross-ticket and cross-repo problems no per-ticket review can see. Dispatched only by /kinetic:run in the review phase.
 model: opus
+tier: strong
 tools: Read, Grep, Glob, Bash
 ---
 

@@ -2,6 +2,7 @@
 name: spec-reviewer
 description: Read-only review of one finished kinetic ticket diff against the ticket's acceptance criteria and linked spec sections. Dispatched only by /kinetic:run.
 model: opus
+tier: strong
 tools: Read, Grep, Glob, Bash
 ---
 

@@ -7,11 +7,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FORBIDDEN = ("jira mode", "Jira key:", "getJiraIssue")
 
+# Spec model tiers: implementer and fix-reviewer are standard; the reviewers and
+# implementer-strong are strong. model: stays as the Claude/Devin default
+# (sonnet for standard, opus for strong).
+AGENT_TIERS = {
+    "fix-reviewer": "standard",
+    "implementer": "standard",
+    "implementer-strong": "strong",
+    "integration-reviewer": "strong",
+    "spec-reviewer": "strong",
+    "standards-reviewer": "strong",
+}
+TIER_MODELS = {"standard": "sonnet", "strong": "opus"}
+
 
 def _text_files(*dirs):
     for d in dirs:
         for p in sorted((ROOT / d).rglob("*.md")):
             yield p
+
+
+def _frontmatter(path):
+    m = re.match(r"---\n(.*?)\n---\n", path.read_text(), re.S)
+    return m.group(1) if m else None
+
+
+def _body(path):
+    text = path.read_text()
+    m = re.match(r"---\n.*?\n---\n", text, re.S)
+    return text[m.end():] if m else text
 
 
 class SkillTextTest(unittest.TestCase):
@@ -61,6 +85,24 @@ class SkillTextTest(unittest.TestCase):
             m = re.match(r"---\n(.*?)\n---\n", p.read_text(), re.S)
             self.assertIsNotNone(m, str(p))
             self.assertIsInstance(yaml.safe_load(m.group(1)), dict, str(p))
+
+    def test_agents_declare_tier_beside_model(self):
+        agents = sorted((ROOT / "agents").glob("*.md"))
+        self.assertEqual({p.stem for p in agents}, set(AGENT_TIERS))
+        for p in agents:
+            fm = _frontmatter(p)
+            self.assertIsNotNone(fm, str(p))
+            tier = re.search(r"^tier:\s*(\S+)\s*$", fm, re.M)
+            self.assertIsNotNone(tier, f"{p.name}: no tier: in frontmatter")
+            self.assertEqual(tier.group(1), AGENT_TIERS[p.stem], p.name)
+            model = re.search(r"^model:\s*(\S+)\s*$", fm, re.M)
+            self.assertIsNotNone(model, f"{p.name}: no model: default")
+            self.assertEqual(model.group(1), TIER_MODELS[tier.group(1)], p.name)
+
+    def test_implementer_strong_shares_implementer_body(self):
+        self.assertEqual(
+            _body(ROOT / "agents" / "implementer-strong.md"),
+            _body(ROOT / "agents" / "implementer.md"))
 
 
 if __name__ == "__main__":
