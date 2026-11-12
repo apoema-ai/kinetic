@@ -120,8 +120,9 @@ def _stale_files(manifest: dict) -> list[str]:
     return stale
 
 
-def _devin_hook_commands(cfg) -> set:
-    """Every command string under the "hooks" key of a Devin config.json."""
+def _hook_commands_in_config(cfg) -> set:
+    """Every command string under the "hooks" key of a hook config object
+    (Devin config.json or a Codex hooks.json — same shape)."""
     cmds = set()
     hooks = cfg.get("hooks") if isinstance(cfg, dict) else None
     if not isinstance(hooks, dict):
@@ -137,6 +138,57 @@ def _devin_hook_commands(cfg) -> set:
                 if isinstance(h, dict) and isinstance(h.get("command"), str):
                     cmds.add(h["command"])
     return cmds
+
+
+def _codex_hooks_checks(home: Path, clone, install_cmd: str) -> list[dict]:
+    """Codex hooks live in ~/.codex/hooks.json (same event/matcher-group
+    shape as Claude's). Registration is checkable; trust is not a simple
+    file flag — Codex records per-hook trusted_hash state in
+    ~/.codex/config.toml [hooks.state] after the user reviews them via
+    /hooks, so doctor recomputes the expected hashes and compares."""
+    hooks_path = home / ".codex" / "hooks.json"
+    config_path = home / ".codex" / "config.toml"
+    if not clone:
+        return [_r("hooks-registered", "warn",
+                   f"no clone recorded; run: {install_cmd}")]
+    cpath = Path(clone)
+    if not cpath.is_dir():
+        return [_r("hooks-registered", "fail",
+                   f"clone path missing: {clone}; re-run: {install_cmd}")]
+    if not hooks_path.is_file():
+        return [_r("hooks-registered", "warn",
+                   f"no Codex hooks.json at {hooks_path}; run: {install_cmd}")]
+    try:
+        cfg = json.loads(hooks_path.read_text())
+    except (OSError, ValueError):
+        cfg = None
+    if not isinstance(cfg, dict):
+        return [_r("hooks-registered", "fail",
+                   f"{hooks_path} is not a JSON object; fix it or re-run: "
+                   f"{install_cmd}")]
+    have = _hook_commands_in_config(cfg)
+    missing = [c for c in install.codex_hook_commands(cpath) if c not in have]
+    out = []
+    if missing:
+        out.append(_r("hooks-registered", "fail",
+                      f"{len(missing)} kinetic hook(s) missing or pointing at "
+                      f"a stale clone in {hooks_path}; re-run: {install_cmd}"))
+    else:
+        out.append(_r("hooks-registered", "pass"))
+    report = install.codex_trust_report(hooks_path, config_path)
+    if report["entries"] == 0:
+        out.append(_r("hooks-trusted", "warn",
+                      "no kinetic hook entries found to verify; run /hooks "
+                      "in Codex and trust kinetic's hooks"))
+    elif report["untrusted"]:
+        out.append(_r("hooks-trusted", "fail",
+                      f"{len(report['untrusted'])} of {report['entries']} "
+                      "kinetic hook(s) not trusted or disabled; open Codex "
+                      "and run /hooks to trust them"))
+    else:
+        out.append(_r("hooks-trusted", "pass",
+                      f"all {report['entries']} kinetic hooks trusted"))
+    return out
 
 
 def _devin_hooks_checks(home: Path, clone, install_cmd: str) -> list[dict]:
@@ -162,7 +214,7 @@ def _devin_hooks_checks(home: Path, clone, install_cmd: str) -> list[dict]:
         return [_r("hooks-registered", "fail",
                    f"{cfg_path} is not a JSON object; fix it or re-run: "
                    f"{install_cmd}")]
-    have = _devin_hook_commands(cfg)
+    have = _hook_commands_in_config(cfg)
     missing = [c for c in install.devin_hook_commands(cpath) if c not in have]
     out = []
     if missing:
@@ -181,11 +233,13 @@ def _devin_hooks_checks(home: Path, clone, install_cmd: str) -> list[dict]:
 
 
 def _hooks_checks(home: Path, clone, hid: str) -> list[dict]:
-    """hooks must be registered for the harness. On Codex, hook trust is a
-    separate stub check until the Codex installer lands."""
+    """hooks must be registered for the harness; on Codex they must also be
+    trusted via /hooks (verified against config.toml hooks.state)."""
     install_cmd = f"kinetic install --harness {hid}"
     if hid == "devin":
         return _devin_hooks_checks(home, clone, install_cmd)
+    if hid == "codex":
+        return _codex_hooks_checks(home, clone, install_cmd)
     if not clone:
         return [_r("hooks-registered", "warn",
                    f"no clone recorded; run: {install_cmd}")]
@@ -197,13 +251,7 @@ def _hooks_checks(home: Path, clone, hid: str) -> list[dict]:
     if not hooks_json.is_file():
         return [_r("hooks-registered", "fail",
                    f"{hooks_json} missing in clone; re-run: {install_cmd}")]
-    out = [_r("hooks-registered", "pass")]
-    if hid == "codex":
-        # Stub: hooks.json exists in the clone, but Codex hook trust (/hooks)
-        # cannot be verified programmatically yet — the Codex ticket refines.
-        out.append(_r("hooks-trusted", "warn",
-                      "run /hooks and trust kinetic's hooks"))
-    return out
+    return [_r("hooks-registered", "pass")]
 
 
 def _tier_check(hid: str, settings: Path) -> dict:

@@ -116,8 +116,8 @@ class ResolveTierTest(unittest.TestCase):
                        "strong": {"model": "opus"}},
             "devin": {"standard": {"model": "sonnet"},
                       "strong": {"model": "opus"}},
-            "codex": {"standard": {"model": "gpt-5.1-codex", "effort": "medium"},
-                      "strong": {"model": "gpt-5.1-codex", "effort": "high"}},
+            "codex": {"standard": {"model": "gpt-6.1-sol", "effort": "medium"},
+                      "strong": {"model": "gpt-6-astra", "effort": "high"}},
             "opencode": {"standard": {"model": "anthropic/claude-sonnet-4-5"},
                          "strong": {"model": "anthropic/claude-opus-4-1"}},
         }
@@ -142,7 +142,7 @@ class ResolveTierTest(unittest.TestCase):
         # Untouched tiers and harnesses keep their profile defaults.
         self.assertEqual(
             harness.resolve_tier("codex", "standard", self.settings),
-            {"model": "gpt-5.1-codex", "effort": "medium"})
+            {"model": "gpt-6.1-sol", "effort": "medium"})
         self.assertEqual(
             harness.resolve_tier("opencode", "strong", self.settings),
             {"model": "anthropic/claude-opus-4-1"})

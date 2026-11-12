@@ -115,8 +115,10 @@ _PROFILES = {
         "plugin_companions": False,
         "plugin_store": None,
         "tier_defaults": {
-            "standard": {"model": "gpt-5.1-codex", "effort": "medium"},
-            "strong": {"model": "gpt-5.1-codex", "effort": "high"},
+            # current Codex catalog (codex-cli 0.167): sol is the workhorse,
+            # astra the flagship; reasoning effort low|medium|high|xhigh|max
+            "standard": {"model": "gpt-6.1-sol", "effort": "medium"},
+            "strong": {"model": "gpt-6-astra", "effort": "high"},
         },
         "enforced": list(GUARANTEES),
     },

@@ -497,6 +497,140 @@ class DevinHooks(HookCase):
         self.assertIn("hookSpecificOutput", out)
 
 
+class CodexHooks(HookCase):
+    """Codex CLI payloads: same Claude-compatible field names plus Codex
+    extensions (hook_event_name, model, permission_mode, tool_use_id, turn_id,
+    transcript_path). File edits arrive as tool_name "apply_patch" with the
+    raw patch in tool_input.command (*** Begin Patch / *** Update File: ...);
+    shell arrives as "Bash". Output is the same JSON shapes Claude uses:
+    hookSpecificOutput.permissionDecision on PreToolUse, flat
+    decision/reason on Stop, hookSpecificOutput.additionalContext on
+    SessionStart. Verified against codex-cli hooks docs (learn.chatgpt.com)."""
+
+    def codex(self, name, payload, **kw):
+        return self.hook(name, payload, harness="codex", **kw)
+
+    def pre(self, tool_name, tool_input, sid="s1", **extra):
+        payload = {"hook_event_name": "PreToolUse", "session_id": sid,
+                   "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                   "permission_mode": "default", "tool_name": tool_name,
+                   "tool_input": tool_input, "tool_use_id": "tu1",
+                   "turn_id": "t1", "transcript_path": None}
+        payload.update(extra)
+        return payload
+
+    def patch(self, *sections):
+        return "*** Begin Patch\n" + "".join(sections) + "*** End Patch"
+
+    def update(self, path, body="@@\n-old\n+new\n"):
+        return f"*** Update File: {path}\n{body}"
+
+    def test_apply_patch_outside_is_denied(self):
+        self.activate()
+        out = self.codex("isolation", self.pre(
+            "apply_patch", {"command": self.patch(self.update("/etc/passwd"))}))
+        self.assertEqual(self.decision(out), "deny")
+        self.assertIn("outside the run workspace",
+                      out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_apply_patch_inside_repo_and_run_dir_allowed(self):
+        self.activate()
+        for path in (str(self.repo / "a.py"), str(self.run_dir / "spec.md"),
+                     "sub/rel.py"):
+            out = self.codex("isolation", self.pre(
+                "apply_patch", {"command": self.patch(self.update(path))}))
+            self.assertIsNone(out, path)
+
+    def test_apply_patch_multi_file_any_outside_denies(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "ok.py")),
+                           self.update("/etc/evil.py"))
+        out = self.codex("isolation", self.pre("apply_patch",
+                                               {"command": patch}))
+        self.assertEqual(self.decision(out), "deny")
+        self.assertIn("evil.py",
+                      out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_apply_patch_add_delete_and_move_headers_checked(self):
+        self.activate()
+        patch = self.patch(
+            "*** Add File: /tmp/new.txt\n+hi\n",
+            "*** Delete File: /etc/gone.txt\n",
+            f"*** Update File: {self.repo}/moved.py\n@@\n-x\n"
+            "*** Move to: /etc/stolen.py\n")
+        out = self.codex("isolation", self.pre("apply_patch",
+                                               {"command": patch}))
+        self.assertEqual(self.decision(out), "deny")
+
+    def test_apply_patch_record_edit_stamps_each_path(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "a.py")),
+                           self.update(str(self.run_dir / "notes.md")))
+        self.codex("record_edit",
+                   {"hook_event_name": "PostToolUse", "session_id": "s1",
+                    "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": patch},
+                    "tool_response": "Success.", "tool_use_id": "tu1"})
+        st = state.load(self.run_dir)
+        self.assertTrue(st["repos"]["api"]["last_edit_at"])
+        # run-dir artifacts are not code (R25): the run_dir path must not
+        # stamp the top-level last_edit_at
+        self.assertFalse(st["last_edit_at"])
+
+    def test_bash_tool_confirm_write_ops_unchanged(self):
+        self.activate()
+        out = self.codex("confirm_write_ops", self.pre(
+            "Bash", {"command": "git push origin main"}))
+        self.assertEqual(self.decision(out), "deny")
+        out = self.codex("confirm_write_ops", self.pre(
+            "Bash", {"command": "git status"}))
+        self.assertIsNone(out)
+
+    def test_stop_gate_blocks_in_codex_shape(self):
+        self.activate()
+        self.stamp(repo_edit=T3)
+        out = self.codex("completion_gate",
+                         {"hook_event_name": "Stop", "session_id": "s1",
+                          "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                          "permission_mode": "default",
+                          "stop_hook_active": False, "turn_id": "t1",
+                          "last_assistant_message": "done",
+                          "transcript_path": None})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("kinetic verify", out["reason"])
+
+    def test_orient_session_start_injects_context(self):
+        self.activate()
+        out = self.codex("orient",
+                         {"hook_event_name": "SessionStart", "session_id": "s1",
+                          "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                          "permission_mode": "default", "source": "startup",
+                          "transcript_path": None})
+        hso = out["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "SessionStart")
+        self.assertIn("feature", hso["additionalContext"])
+
+    def test_isolation_fail_closed_asks_on_apply_patch_garbage(self):
+        self.activate()
+        (self.run_dir / "state.json").write_text("{not json")
+        out = self.codex("isolation", self.pre(
+            "apply_patch", {"command": "not a patch at all"}))
+        self.assertEqual(self.decision(out), "ask")
+
+    def test_claim_run_via_bash_exec(self):
+        self.activate()
+        self.codex("claim_run",
+                   {"hook_event_name": "PostToolUse", "session_id": "s1",
+                    "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                    "tool_name": "Bash",
+                    "tool_input": {"command":
+                                   "printf '%s' /r | tee "
+                                   "~/.config/kinetic/active-run"},
+                    "tool_response": "", "tool_use_id": "tu1"})
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
+
+
 class RecordEditAndOrient(HookCase):
     def test_record_edit_stamps_repo(self):
         self.activate()
