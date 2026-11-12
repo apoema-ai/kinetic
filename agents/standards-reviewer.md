@@ -27,6 +27,7 @@ Shell commands are for `git diff`, `git log` and `git show` only. Do not run bui
 - Documented standards present in the repo: every instruction file that exists — `CLAUDE.md`, `AGENTS.md`, whichever the repo has — plus `CONTRIBUTING*`, lint and formatter configs. Cite the rule you rely on.
 - The tdd skill's test rules: tests verify behavior through public interfaces, not implementation details; mocks only at system boundaries; no tests that pass for the wrong reason.
 - Read changed files in full when the diff alone is not enough, but report only on changed lines. Pre-existing problems are out of scope.
+- Apply the tdd skill's "Name the break" and "Mutation check" to the changed tests: a test that no realistic mutation of the production code would fail, or whose expected value is computed by the code under test, is a test that proves nothing. Judge this by reading, not by running anything.
 - Do not invent standards. If the repo documents none for an area, do not flag it.
 
 ## Output
