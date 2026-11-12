@@ -353,7 +353,7 @@ class DoctorTest(unittest.TestCase):
         cfg_path = self.home / ".codex" / "config.toml"
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         lines = []
-        for e in install.codex_trust_entries(hooks_path):
+        for e in doctor.codex_trust_entries(hooks_path):
             lines.append(f'[hooks.state."{e["key"]}"]')
             lines.append(f'trusted_hash = "{e["hash"]}"')
             if not enabled:
@@ -389,7 +389,7 @@ class DoctorTest(unittest.TestCase):
         # a trusted_hash that does not match the current definition -> fail
         cfg_path = self.home / ".codex" / "config.toml"
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        entries = install.codex_trust_entries(hooks_path)
+        entries = doctor.codex_trust_entries(hooks_path)
         lines = []
         for e in entries:
             lines.append(f'[hooks.state."{e["key"]}"]')
@@ -555,6 +555,24 @@ class DoctorTest(unittest.TestCase):
         # devin's profile allows plugin companions; the claude cache is the
         # only known plugin location until the Devin installer lands
         self.assertEqual(c["skill:superpowers"]["status"], "warn")
+
+    def test_companion_skills_flat_files_opencode_only(self):
+        # OpenCode discovers flat <name>.md skill files too (the layout its
+        # installer uses for kntc- stubs); other harnesses need the
+        # <name>/SKILL.md directory layout
+        for hid, skill_root in (("opencode", ".config/opencode/skills"),
+                                ("codex", ".agents/skills")):
+            clone = self._fake_clone(hid + "-clone")
+            self._write_settings(harness=hid, clone=str(clone))
+            for s in SKILLS:
+                f = self.home / skill_root / f"{s}.md"
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text("x")
+            c = self._by_name()
+            for s in SKILLS:
+                expected = "pass" if hid == "opencode" else "warn"
+                self.assertEqual(c["skill:" + s]["status"], expected,
+                                 (hid, s))
 
     def test_plugin_companions_na_when_profile_disallows(self):
         for hid in ("codex", "opencode"):

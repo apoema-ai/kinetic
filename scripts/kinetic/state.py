@@ -106,7 +106,7 @@ def stale_verify(state: dict) -> list:
     for name, repo in state.get("repos", {}).items():
         stamp = repo.get("last_edit_at")
         if not stamp or any(t.get("repo") == name and t.get("status") in OCCUPIED
-                            for t in state.get("tickets", {}).items()):
+                            for t in state.get("tickets", {}).values()):
             continue
         newest = max((v for v in verifies if v.get("repo") == name),
                      key=lambda v: v.get("at") or "", default=None)
@@ -123,6 +123,18 @@ def stale_verify(state: dict) -> list:
     return bad
 
 
+def verify_command(run_dir, repo: str, path: str, ticket=None) -> str:
+    """The `kinetic verify` remediation command for one stale_verify entry;
+    shared by ship_refusal and the completion_gate Stop hook so both name
+    the same command."""
+    cmd = (f"kinetic verify --run {shlex.quote(str(run_dir))} "
+           f"--repo-name {shlex.quote(repo)} "
+           f"--repo-path {shlex.quote(path)}")
+    if ticket:
+        cmd += f" --ticket {shlex.quote(ticket)}"
+    return cmd
+
+
 def ship_refusal(state: dict, run_dir) -> str | None:
     """Why the run may not enter or approve the ship phase: verify is stale.
     Returns a remediation message or None. This is the CLI-level half of the
@@ -137,12 +149,8 @@ def ship_refusal(state: dict, run_dir) -> str | None:
             lines.append("edits outside registered repos: run verify for "
                          "the repo you edited")
         elif b["path"]:
-            cmd = (f"kinetic verify --run {shlex.quote(str(run_dir))} "
-                   f"--repo-name {shlex.quote(b['repo'])} "
-                   f"--repo-path {shlex.quote(b['path'])}")
-            if b["ticket"]:
-                cmd += f" --ticket {shlex.quote(b['ticket'])}"
-            lines.append(cmd)
+            lines.append(verify_command(run_dir, b["repo"], b["path"],
+                                        b["ticket"]))
         else:
             lines.append(f"{b['repo']}: run verify for the repo you edited")
     return ("verify is stale: no passing verify after the last edit. "

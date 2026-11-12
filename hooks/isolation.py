@@ -5,20 +5,10 @@ import os
 import _common
 
 
-def _paths(ti):
-    """File paths a tool call will touch: a list for multi-file tools
-    (Codex apply_patch), else the single file_path/notebook_path."""
-    paths = ti.get("file_paths")
-    if paths is not None:
-        return list(paths)
-    path = ti.get("file_path") or ti.get("notebook_path")
-    return [path] if path else []
-
-
 def main(inp):
     found = _common.active_run(inp)
     ti = inp.get("tool_input") or {}
-    paths = _paths(ti)
+    paths = _common.tool_paths(ti)
     if not found or (not paths and ti.get("file_paths") is None):
         return
     # a patch tool whose headers did not parse cannot be checked -> ask

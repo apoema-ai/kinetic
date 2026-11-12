@@ -418,7 +418,7 @@ class InstallCodexTest(InstallCase):
     """`kinetic install --harness codex` generates files only: kntc-<name>
     stub skills under ~/.agents/skills, agent TOML under ~/.codex/agents and
     a merged ~/.codex/hooks.json. It never shells out to codex (hook trust is
-    a manual /hooks step); it only requires the CLI on PATH."""
+    a manual /hooks step) and does not require the codex CLI on PATH."""
 
     USER_ONLY = {"ask", "doctor", "implement", "init", "run", "status"}
     SKILL_NAMES = {"ask", "doctor", "grill", "implement", "init", "retro",
@@ -434,16 +434,6 @@ class InstallCodexTest(InstallCase):
                         ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(ROOT / "agents", self.clone / "agents",
                         ignore=shutil.ignore_patterns("__pycache__"))
-        self.base_path = os.environ.get("PATH", "")
-        self.bin = self.tmp / "codex-bin"
-        self.bin.mkdir()
-        codex = self.bin / "codex"
-        codex.write_text("#!/bin/sh\nexit 0\n")
-        codex.chmod(0o755)
-        patcher = mock.patch.dict(
-            os.environ, {"PATH": f"{self.bin}:{self.base_path}"})
-        patcher.start()
-        self.addCleanup(patcher.stop)
 
     @property
     def skills_dir(self):
@@ -607,18 +597,18 @@ class InstallCodexTest(InstallCase):
         # stubs point at the new clone too
         self.assertIn(str(moved), self._stub("run").read_text())
 
-    def test_install_codex_fails_without_cli(self):
-        # a PATH with git (needed by the clone check) but no codex
+    def test_install_codex_needs_no_cli(self):
+        # file generation only: a PATH with git (needed by the clone check)
+        # but no codex still installs
         nogit = self.tmp / "no-codex-bin"
         nogit.mkdir()
         (nogit / "git").symlink_to(shutil.which("git"))
         with mock.patch.dict(os.environ, {"PATH": str(nogit)}):
             p = self._install("--harness", "codex")
-        self.assertNotEqual(p.returncode, 0)
-        self.assertIn("codex", p.stderr.lower())
-        self.assertFalse(self.manifest_path.exists())
-        self.assertFalse(self.settings_path.exists())
-        self.assertFalse(self.hooks_json.exists())
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(self.manifest_path.exists())
+        self.assertTrue(self.settings_path.exists())
+        self.assertTrue(self.hooks_json.exists())
 
     def test_install_codex_rejects_malformed_hooks_json(self):
         self.hooks_json.parent.mkdir(parents=True)
@@ -761,6 +751,16 @@ class InstallOpenCodeTest(InstallCase):
         self.assertNotIn("- action: edit", impl)
         self.assertIn("- action: webfetch", impl)  # no WebFetch in tools:
 
+        # OpenCode agent frontmatter has no skill preload: the generated
+        # implementer must not claim `tdd` is preloaded; it is pointed at
+        # the clone's skill file instead
+        for agent_file in ("implementer.md", "implementer-strong.md"):
+            text = (self.agents_dir / agent_file).read_text()
+            self.assertNotIn("is preloaded", text, agent_file)
+            self.assertIn("not preloaded", text, agent_file)
+            self.assertIn(f"{self.clone}/skills/tdd/SKILL.md", text,
+                          agent_file)
+
         # the plugin is generated with the clone path baked in
         self.assertTrue(self.plugin.is_file())
         text = self.plugin.read_text()
@@ -819,7 +819,10 @@ class InstallOpenCodeTest(InstallCase):
         self.assertNotIn(json.dumps(str(self.clone)),
                          self.plugin.read_text())
         self.assertIn(str(moved), self._stub("run").read_text())
-        # agent files carry no clone path but are regenerated regardless
+        # agent files embed the clone path in the tdd skill reference and
+        # are regenerated regardless
+        self.assertIn(str(moved),
+                      (self.agents_dir / "implementer.md").read_text())
         self.assertTrue((self.agents_dir / "implementer.md").is_file())
 
     def test_install_opencode_fails_without_skills(self):
