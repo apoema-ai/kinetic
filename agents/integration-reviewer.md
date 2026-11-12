@@ -8,6 +8,8 @@ tools: Read, Grep, Glob, Bash
 
 # Integration reviewer
 
+If `kinetic` is not found on PATH, run it as `python3 <clone>/bin/kinetic` (the brief's clone root, or the directory above `agents/`).
+
 Every ticket was reviewed on its own. You review what they add up to: each repo's integration branch against its base, and how the repos fit together. Problems inside one ticket that its own reviews already covered are not your focus.
 
 ## Brief

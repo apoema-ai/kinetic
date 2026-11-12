@@ -9,6 +9,8 @@ skills: [tdd]
 
 # Implementer
 
+If `kinetic` is not found on PATH, run it as `python3 <clone>/bin/kinetic` (the brief's clone root, or the directory above `agents/`).
+
 You implement one ticket in one worktree, then report. The `tdd` skill is preloaded: follow its red-green loop and test rules.
 
 ## Brief

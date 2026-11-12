@@ -44,7 +44,7 @@ def merge_ticket(repo_path, ticket_branch: str, integration_branch: str) -> dict
 
 def status_hash(repo) -> str:
     """Stable sha256 of the repo's working state: `git status --porcelain`,
-    `git diff HEAD` and the bytes of untracked files, so a content edit to an
+    `git diff HEAD` and the bytes of untracked files (gitignored files are not covered), so a content edit to an
     already-dirty or untracked file changes it too."""
     h = hashlib.sha256()
     for args in (("status", "--porcelain"), ("diff", "HEAD")):
@@ -56,9 +56,11 @@ def status_hash(repo) -> str:
     for name in sorted(r.stdout.splitlines()):
         h.update(name.encode("utf-8"))
         try:
-            h.update((Path(repo) / name).read_bytes())
+            with open(Path(repo) / name, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
         except OSError:
-            pass
+            h.update(b"<unreadable>")  # nested repo or no permission
     return h.hexdigest()
 
 

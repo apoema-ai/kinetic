@@ -65,7 +65,7 @@ OpenCode:
 <path-to-kinetic>/bin/kinetic install --harness opencode
 ```
 
-`kinetic install` links `kinetic` onto your PATH (`~/.local/bin` — make sure that directory is on your PATH), records the harness and clone in `~/.config/kinetic/settings.json`, and writes an install manifest that `doctor` checks for staleness. Re-run it after `git pull`; `kinetic install --harness <h> --uninstall` removes everything it wrote. On Claude Code, plugin registration itself (`claude --plugin-dir`) stays manual; on Devin CLI the installer runs `devin plugins install --local <clone>` itself (skills appear as `/kinetic:<name>`) and writes Devin-format hooks into `~/.config/devin/config.json`, preserving any foreign entries. Devin support is validated by the manual checklist in `docs/smoke/devin.md`.
+`kinetic install` links `kinetic` onto your PATH (`~/.local/bin` — make sure that directory is on your PATH), records the harness and clone in `~/.config/kinetic/settings.json`, and writes an install manifest that `doctor` checks for staleness. Re-run it after `git pull`; `kinetic install --harness <h> --uninstall` removes everything it wrote. On Claude Code, plugin registration itself (`claude --plugin-dir`) stays manual; on Devin CLI the installer runs `devin plugins install --local <clone>` itself (skills appear as `/kinetic:<name>`) and writes Devin-format hooks into `~/.config/devin/config.json`, preserving any foreign entries. Devin support is unverified until the manual checklist in `docs/smoke/devin.md` has been run (it also settles whether Devin double-registers the clone's `hooks/hooks.json`).
 
 On Codex CLI the installer is file generation only: it writes `kntc-<name>` stub skills under `~/.agents/skills` (user-only skills get an `agents/openai.yaml` sidecar with `policy.allow_implicit_invocation: false`), agent definitions under `~/.codex/agents/*.toml` with the tier resolved to `model`/`model_reasoning_effort` (override via `tiers.codex` in `settings.json`), and merges kinetic's hooks into `~/.codex/hooks.json`, preserving foreign entries. Codex gates hooks behind interactive trust: after install, open Codex and run `/hooks` to review and trust kinetic's hooks — they stay inactive until trusted, and `kinetic doctor` fails its `hooks-trusted` check until the `trusted_hash` state matches. Codex support is validated by the manual checklist in `docs/smoke/codex.md`. Known Codex limitations: per-agent tool allow-lists are not honoured (the `tools:` frontmatter has no Codex agent equivalent), and the write-op/deploy confirmation hooks only fire on tool names matching `mcp__.*` patterns — verify MCP tool naming during the smoke run.
 
@@ -480,6 +480,10 @@ The run-scoped hooks (isolation, record_edit, completion_gate) act only in the s
 - **Doctor checks:** `git` and `gh` on PATH, `gh auth status`, a readable `repos.json`, a resolvable verify command per repo, the optional companion skills and plugins, and a reminder to check the Atlassian MCP with `/mcp`.
 
 **Upgrading an existing Claude Code install:** skills, agents and hooks now call `kinetic ...` instead of `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/scripts python3 -m kinetic.*`. After updating, run `<clone>/bin/kinetic install --harness claude` once; until then `doctor` warns and skills fall back to `python3 <plugin-root>/bin/kinetic`.
+
+**OpenCode:** the plugin asks for confirmation on every edit or shell call when `python3` is missing or a kinetic hook crashes, rather than allowing it.
+
+**Reviewer read-only check:** the hash covers tracked diffs and untracked files; gitignored files are not covered.
 
 **Stale-verify guard:** on every harness (Claude included), `set-phase ship` and an approved ship gate are refused while a repo's verify is stale — this is intentional.
 

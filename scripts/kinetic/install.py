@@ -98,9 +98,13 @@ def _foreign_files(generated: dict, prev_files: dict) -> list:
     kinetic install and differ from what we would write (a user's own file)."""
     out = []
     for path, text in generated.items():
-        if (os.path.lexists(path) and str(path) not in prev_files
-                and (path.is_dir() or path.read_text() != text)):
-            out.append(path)
+        if os.path.lexists(path) and str(path) not in prev_files:
+            try:
+                same = path.is_file() and path.read_text() == text
+            except (OSError, UnicodeDecodeError):
+                same = False
+            if not same:
+                out.append(path)
     return out
 
 
@@ -126,6 +130,10 @@ def _write_generated_files(generated: dict, prev_files: dict | None = None) -> N
                 and op.is_file() and not op.is_symlink()
                 and _hash_file(op) == entry.get("sha256")):
             op.unlink()
+            try:
+                op.parent.rmdir()  # only succeeds when empty
+            except OSError:
+                pass
 
 
 def _generated_files(link: Path, launcher: Path, generated: dict) -> dict:
