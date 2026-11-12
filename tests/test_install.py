@@ -170,10 +170,11 @@ class InstallClaudeTest(InstallCase):
         self.assertFalse(self.link.exists())
 
     def test_unsupported_harness_writes_nothing(self):
-        for hid in ("opencode",):
-            p = self._install("--harness", hid)
-            self.assertNotEqual(p.returncode, 0, hid)
-            self.assertIn("not yet supported", p.stderr)
+        # every HARNESS_IDS member is supported now; an unknown id is
+        # rejected by argparse before anything is written
+        p = self._install("--harness", "bogus")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("bogus", p.stderr)
         self.assertFalse(self.link.exists())
         self.assertFalse(self.settings_path.exists())
         self.assertFalse(list((self.home / ".config").rglob("*manifest*")))
@@ -661,6 +662,195 @@ class InstallCodexTest(InstallCase):
         cmds = self._hook_commands(cfg)
         self.assertFalse(any("--harness codex" in c for c in cmds))
         self.assertIn("echo foreign", cmds)
+
+
+class InstallOpenCodeTest(InstallCase):
+    """`kinetic install --harness opencode` is file generation only: flat
+    kntc-<name>.md skill stubs under ~/.config/opencode/skills, markdown
+    agents under ~/.config/opencode/agents and the kinetic.ts plugin under
+    ~/.config/opencode/plugins. OpenCode file-drops plugins (no config merge,
+    no trust step) so nothing foreign is touched; the opencode CLI is not
+    required on PATH."""
+
+    USER_ONLY = {"ask", "doctor", "implement", "init", "run", "status"}
+    SKILL_NAMES = {"ask", "doctor", "grill", "implement", "init", "retro",
+                   "run", "ship", "spec", "status", "tdd", "tickets"}
+    AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
+                   "integration-reviewer", "spec-reviewer",
+                   "standards-reviewer"}
+
+    def setUp(self):
+        super().setUp()
+        # the opencode installer reads skills/, agents/ and templates/ from
+        # the clone
+        shutil.copytree(ROOT / "skills", self.clone / "skills",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(ROOT / "agents", self.clone / "agents",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(ROOT / "templates", self.clone / "templates",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+
+    @property
+    def skills_dir(self):
+        return self.home / ".config" / "opencode" / "skills"
+
+    @property
+    def agents_dir(self):
+        return self.home / ".config" / "opencode" / "agents"
+
+    @property
+    def plugins_dir(self):
+        return self.home / ".config" / "opencode" / "plugins"
+
+    @property
+    def plugin(self):
+        return self.plugins_dir / "kinetic.ts"
+
+    @property
+    def manifest_path(self):
+        return (self.home / ".config" / "kinetic"
+                / "install-manifest-opencode.json")
+
+    def _stub(self, name):
+        return self.skills_dir / f"kntc-{name}.md"
+
+    def test_install_writes_stubs_agents_plugin_and_state(self):
+        p = self._install("--harness", "opencode")
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+        self.assertTrue(self.link.is_symlink())
+        settings = self._settings()
+        self.assertEqual(settings["harness"], "opencode")
+        self.assertEqual(settings["clone"], str(self.clone))
+
+        # one flat kntc-<name>.md stub per skill
+        for name in self.SKILL_NAMES:
+            stub = self._stub(name)
+            self.assertTrue(stub.is_file(), name)
+            text = stub.read_text()
+            self.assertIn(f"name: kntc-{name}", text)
+            self.assertIn('description: "kinetic: ', text)
+            self.assertIn(f"{self.clone}/skills/{name}/SKILL.md", text)
+            if name in self.USER_ONLY:
+                self.assertIn("disable-model-invocation: true", text, name)
+            else:
+                self.assertNotIn("disable-model-invocation", text, name)
+
+        # markdown agents, one per agents/*.md, tier resolved to a model
+        from kinetic import harness as _h
+        std = _h.resolve_tier("opencode", "standard",
+                              settings=self.settings_path)
+        sst = _h.resolve_tier("opencode", "strong",
+                              settings=self.settings_path)
+        for name in self.AGENT_NAMES:
+            agent = self.agents_dir / f"{name}.md"
+            self.assertTrue(agent.is_file(), name)
+            text = agent.read_text()
+            self.assertIn("mode: subagent", text)
+            self.assertIn("description:", text)
+            self.assertIn("# ", text)  # the markdown body is the prompt
+        impl = (self.agents_dir / "implementer.md").read_text()
+        strong = (self.agents_dir / "implementer-strong.md").read_text()
+        self.assertIn(f'model: "{std["model"]}"', impl)
+        self.assertIn(f'model: "{sst["model"]}"', strong)
+        # tools: allow-list -> permission denies for omitted groups:
+        # reviewers have no edit tools, implementers do
+        reviewer = (self.agents_dir / "spec-reviewer.md").read_text()
+        self.assertIn("- action: edit", reviewer)
+        self.assertIn("effect: deny", reviewer)
+        self.assertNotIn("- action: edit", impl)
+        self.assertIn("- action: webfetch", impl)  # no WebFetch in tools:
+
+        # the plugin is generated with the clone path baked in
+        self.assertTrue(self.plugin.is_file())
+        text = self.plugin.read_text()
+        self.assertIn(str(self.clone), text)
+        for needle in ("--harness", "opencode", "execute.before",
+                       "execute.after", "experimental.idle",
+                       "permission", "completion_gate", "record_edit",
+                       "isolation", "orient"):
+            self.assertIn(needle, text)
+
+        m = json.loads(self.manifest_path.read_text())
+        self.assertEqual(m["harness"], "opencode")
+        self.assertEqual(m["clone"], str(self.clone))
+        # every generated file is manifest-listed for staleness checks
+        for f in (self._stub("run"), self.agents_dir / "implementer.md",
+                  self.plugin):
+            self.assertIn(str(f), m["files"])
+        self.assertIn("docs/smoke/opencode.md", p.stdout)
+
+    def test_install_opencode_is_idempotent(self):
+        self.assertEqual(self._install("--harness", "opencode").returncode, 0)
+        first_manifest = self.manifest_path.read_text()
+        first_plugin = self.plugin.read_text()
+        p = self._install("--harness", "opencode")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.manifest_path.read_text(), first_manifest)
+        self.assertEqual(self.plugin.read_text(), first_plugin)
+
+    def test_install_opencode_preserves_foreign_plugins(self):
+        foreign = self.plugins_dir / "rtk.ts"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text("// foreign plugin\n")
+        warp = self.plugins_dir / "opencode-warp"
+        warp.mkdir()
+        (warp / "index.ts").write_text("// foreign\n")
+        p = self._install("--harness", "opencode")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(foreign.read_text(), "// foreign plugin\n")
+        self.assertTrue((warp / "index.ts").is_file())
+
+        p = self._uninstall("opencode")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(foreign.is_file())
+        self.assertTrue((warp / "index.ts").is_file())
+
+    def test_install_opencode_replaces_stale_clone_paths(self):
+        self.assertEqual(self._install("--harness", "opencode").returncode, 0)
+        moved = self.tmp / "clone2"
+        shutil.copytree(self.clone, moved, symlinks=True)
+        _git(moved, "init")
+        p = self._install("--harness", "opencode", clone=moved)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn(str(moved), self.plugin.read_text())
+        # the baked path is a quoted JSON string, so the old clone path
+        # cannot match as a substring of the new one (clone vs clone2)
+        self.assertNotIn(json.dumps(str(self.clone)),
+                         self.plugin.read_text())
+        self.assertIn(str(moved), self._stub("run").read_text())
+        # agent files carry no clone path but are regenerated regardless
+        self.assertTrue((self.agents_dir / "implementer.md").is_file())
+
+    def test_install_opencode_fails_without_skills(self):
+        shutil.rmtree(self.clone / "skills")
+        p = self._install("--harness", "opencode")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("skills", p.stderr)
+        self.assertFalse(self.manifest_path.exists())
+        self.assertFalse(self.settings_path.exists())
+        self.assertFalse(self.plugin.exists())
+
+    # --- uninstall ---------------------------------------------------------
+
+    def test_uninstall_opencode_removes_everything_it_wrote(self):
+        self.assertEqual(self._install("--harness", "opencode").returncode, 0)
+        p = self._uninstall("opencode")
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+        self.assertFalse(os.path.lexists(self.link))
+        self.assertFalse(self.settings_path.exists())
+        self.assertFalse(self.manifest_path.exists())
+        for name in self.SKILL_NAMES:
+            self.assertFalse(self._stub(name).exists(), name)
+        for name in self.AGENT_NAMES:
+            self.assertFalse((self.agents_dir / f"{name}.md").exists(),
+                             name)
+        self.assertFalse(self.plugin.exists())
+        # generated dirs are pruned when empty; plugins dir stays (foreign
+        # plugins may live there, and rmdir only fires on empty dirs anyway)
+        self.assertFalse(self.skills_dir.exists())
+        self.assertFalse(self.agents_dir.exists())
 
 
 class UninstallTest(InstallCase):

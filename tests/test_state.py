@@ -130,6 +130,68 @@ class StateTest(unittest.TestCase):
         self.assertTrue(s["gates"]["ship"]["approved"])
         self.assertEqual(s["rulings"][0]["what"], "what")
 
+    def test_ship_phase_refuses_stale_verify(self):
+        state.init(self.run_dir, "feature", "F-1")
+        repo = Path(self._tmp.name) / "repo"
+        repo.mkdir()
+        state.set_repo(self.run_dir, "api", str(repo), "main")
+        state.record_edit(self.run_dir, str(repo / "a.py"))
+        with self.assertRaises(ValueError) as ctx:
+            state.set_phase(self.run_dir, "ship")
+        self.assertIn("verify is stale", str(ctx.exception))
+        self.assertIn("kinetic verify", str(ctx.exception))
+        self.assertEqual(state.load(self.run_dir)["phase"], "intake")
+        # a fresh passing verify clears the refusal
+        state.record_verify(self.run_dir, None, 0, "l", repo_name="api")
+        self.assertEqual(state.set_phase(self.run_dir, "ship")["phase"],
+                         "ship")
+
+    def test_ship_phase_refuses_failed_and_outside_repo_edits(self):
+        state.init(self.run_dir, "feature", "F-1")
+        repo = Path(self._tmp.name) / "repo"
+        repo.mkdir()
+        state.set_repo(self.run_dir, "api", str(repo), "main")
+        state.record_edit(self.run_dir, str(repo / "a.py"))
+        # a failed verify does not count as fresh
+        state.record_verify(self.run_dir, None, 1, "l", repo_name="api")
+        with self.assertRaises(ValueError):
+            state.set_phase(self.run_dir, "ship")
+        # edits outside every registered repo also refuse
+        state.record_verify(self.run_dir, None, 0, "l", repo_name="api")
+        outside = Path(self._tmp.name) / "elsewhere.py"
+        state.record_edit(self.run_dir, str(outside))
+        with self.assertRaises(ValueError) as ctx:
+            state.set_phase(self.run_dir, "ship")
+        self.assertIn("outside registered repos", str(ctx.exception))
+
+    def test_ship_gate_refuses_stale_verify_but_hold_is_free(self):
+        state.init(self.run_dir, "feature", "F-1")
+        repo = Path(self._tmp.name) / "repo"
+        repo.mkdir()
+        state.set_repo(self.run_dir, "api", str(repo), "main")
+        state.record_edit(self.run_dir, str(repo / "a.py"))
+        with self.assertRaises(ValueError):
+            state.record_gate(self.run_dir, "ship", True, "ok")
+        # a rejected/held gate is not a proceed decision
+        state.record_gate(self.run_dir, "ship", False, "hold")
+        self.assertFalse(state.load(self.run_dir)["gates"]["ship"]
+                         ["approved"])
+        state.record_verify(self.run_dir, None, 0, "l", repo_name="api")
+        state.record_gate(self.run_dir, "ship", True, "ok")
+        self.assertTrue(state.load(self.run_dir)["gates"]["ship"]
+                        ["approved"])
+
+    def test_other_phases_and_gates_unaffected_by_stale_verify(self):
+        state.init(self.run_dir, "feature", "F-1")
+        repo = Path(self._tmp.name) / "repo"
+        repo.mkdir()
+        state.set_repo(self.run_dir, "api", str(repo), "main")
+        state.record_edit(self.run_dir, str(repo / "a.py"))
+        self.assertEqual(state.set_phase(self.run_dir, "review")["phase"],
+                         "review")
+        state.record_gate(self.run_dir, "spec", True, "ok")
+        state.record_gate(self.run_dir, "breakdown", True, "ok")
+
     def test_concurrent_writers_keep_all_updates(self):
         state.init(self.run_dir, "epic", "E-1")
         with multiprocessing.Pool(4) as pool:

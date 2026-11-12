@@ -133,7 +133,9 @@ _PROFILES = {
             "trust": "none",
         },
         "tools": {
-            "shell": "bash",
+            # v2 name is "shell" (v1 called it "bash"); the normalizer and
+            # plugin accept both spellings
+            "shell": "shell",
             "edit": ["edit", "write"],
             "patch": "patch",
         },
@@ -149,8 +151,10 @@ _PROFILES = {
             "standard": {"model": "anthropic/claude-sonnet-4-5"},
             "strong": {"model": "anthropic/claude-opus-4-1"},
         },
-        # verify-before-stop stays Instructed: the idle re-prompt's reliability is
-        # unconfirmed (spec Further Notes); verify/ship still refuses stale verify.
+        # verify-before-stop stays Instructed: the experimental.idle re-prompt
+        # is bounded (the plugin stops after a few ignored rounds) and the API
+        # is marked experimental; the CLI-level verify/ship stale refusal is
+        # the hard gate and holds on every harness.
         "enforced": [g for g in GUARANTEES if g != "verify-before-stop"],
     },
 }

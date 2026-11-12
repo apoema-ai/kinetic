@@ -232,6 +232,37 @@ def _devin_hooks_checks(home: Path, clone, install_cmd: str) -> list[dict]:
     return out
 
 
+def _opencode_hooks_checks(home: Path, clone, install_cmd: str) -> list[dict]:
+    """OpenCode hooks are the generated plugin
+    ~/.config/opencode/plugins/kinetic.ts — a file-drop plugin with no
+    registration or trust step. Check it exists, that it still points at the
+    recorded clone (a moved clone leaves a stale baked-in path) and that the
+    clone's hooks directory is present."""
+    plugin = home / ".config" / "opencode" / "plugins" / "kinetic.ts"
+    if not clone:
+        return [_r("hooks-registered", "warn",
+                   f"no clone recorded; run: {install_cmd}")]
+    cpath = Path(clone)
+    if not cpath.is_dir():
+        return [_r("hooks-registered", "fail",
+                   f"clone path missing: {clone}; re-run: {install_cmd}")]
+    if not plugin.is_file():
+        return [_r("hooks-registered", "warn",
+                   f"no kinetic OpenCode plugin at {plugin}; run: {install_cmd}")]
+    try:
+        text = plugin.read_text()
+    except OSError:
+        text = ""
+    # the plugin bakes the clone path as a quoted JSON string literal
+    if json.dumps(str(cpath)) not in text or not (cpath / "hooks").is_dir():
+        return [_r("hooks-registered", "fail",
+                   f"{plugin} is stale (clone moved or hooks missing); "
+                   f"re-run: {install_cmd}")]
+    return [_r("hooks-registered", "pass"),
+            _r("hooks-trusted", "na",
+               "n/a, OpenCode plugins load without a trust step")]
+
+
 def _hooks_checks(home: Path, clone, hid: str) -> list[dict]:
     """hooks must be registered for the harness; on Codex they must also be
     trusted via /hooks (verified against config.toml hooks.state)."""
@@ -240,6 +271,8 @@ def _hooks_checks(home: Path, clone, hid: str) -> list[dict]:
         return _devin_hooks_checks(home, clone, install_cmd)
     if hid == "codex":
         return _codex_hooks_checks(home, clone, install_cmd)
+    if hid == "opencode":
+        return _opencode_hooks_checks(home, clone, install_cmd)
     if not clone:
         return [_r("hooks-registered", "warn",
                    f"no clone recorded; run: {install_cmd}")]
