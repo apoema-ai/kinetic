@@ -1,0 +1,12 @@
+{
+  "name": "kinetic",
+  "owner": {"name": "apoema-ai"},
+  "plugins": [
+    {
+      "name": "kinetic",
+      "source": "./",
+      "description": "SDLC pipeline: grill, spec, tickets, multi-repo build, review, ship, retro",
+      "version": "0.3.1"
+    }
+  ]
+}
