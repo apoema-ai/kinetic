@@ -56,15 +56,21 @@ def _harness(argv=None) -> str:
     return hid
 
 
+def _profile_tools(harness: str) -> dict:
+    """The harness profile's tools table ({} when the profile cannot load —
+    hooks must never crash on a missing package)."""
+    try:
+        from kinetic import harness as profiles
+        return profiles.profile(harness)["tools"]
+    except Exception:
+        return {}
+
+
 def _tool_aliases(harness: str) -> dict:
     """Map a harness's tool names onto the Claude names the hook logic reads
     ("Bash" for shell, "Write" for file edits). Built from the harness profile;
     claude needs no mapping and is never normalised."""
-    try:
-        from kinetic import harness as profiles
-        tools = profiles.profile(harness)["tools"]
-    except Exception:
-        return {}
+    tools = _profile_tools(harness)
     aliases = {}
     if tools.get("shell"):
         aliases[tools["shell"]] = "Bash"
@@ -82,7 +88,10 @@ def _norm_devin(inp: dict) -> dict:
     Devin sends {hook_event_name, tool_name, tool_input, session_id, prompt_id}
     with no cwd — DEVIN_PROJECT_DIR carries the project root. Tool names differ
     (exec, edit, write); they are mapped through the harness profile. File tools
-    may spell the path differently; canonicalise to file_path."""
+    may spell the path differently; canonicalise to file_path. apply_patch
+    carries the raw patch text instead; its file headers are extracted into
+    file_paths exactly like Codex's (the input field is undocumented, so the
+    spellings the other harnesses use are all tried)."""
     out = dict(inp)
     raw_ti = inp.get("tool_input")
     ti = dict(raw_ti) if isinstance(raw_ti, dict) else {}
@@ -91,8 +100,15 @@ def _norm_devin(inp: dict) -> dict:
             if ti.get(key):
                 ti["file_path"] = ti[key]
                 break
-    out["tool_input"] = ti
     name = out.get("tool_name")
+    patch_tool = _profile_tools("devin").get("patch")
+    if patch_tool and name == patch_tool:
+        # file_paths is set even when empty so fail-closed hooks can tell
+        # "no paths parsed" apart from "not a patch tool"
+        text = (ti.get("command") or ti.get("patch") or ti.get("patchText")
+                or ti.get("patch_text") or ti.get("input") or "")
+        ti["file_paths"] = _patch_paths(text)
+    out["tool_input"] = ti
     alias = _tool_aliases("devin").get(name)
     if alias:
         out["tool_name"] = alias
@@ -253,6 +269,17 @@ def active_run(inp=None):
 
 def abs_path(path: str, cwd) -> str:
     return path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path)
+
+
+def tool_paths(ti: dict) -> list:
+    """File paths a tool call will touch: a list for multi-file tools
+    (apply_patch on Codex/Devin/OpenCode), else the single
+    file_path/notebook_path."""
+    paths = ti.get("file_paths")
+    if paths is not None:
+        return list(paths)
+    path = ti.get("file_path") or ti.get("notebook_path")
+    return [path] if path else []
 
 
 def _pre_tool_devin(decision: str, reason: str) -> None:

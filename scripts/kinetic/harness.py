@@ -48,10 +48,12 @@ _PROFILES = {
         "model_per_dispatch": True,    # Agent tool model: parameter
         "question_tool": "AskUserQuestion",
         "skill_dirs": ["~/.claude/skills"],
+        "flat_skill_files": False,   # skills are <name>/SKILL.md dirs only
         "agent_dirs": ["~/.claude/agents"],
         "instruction_files": ["CLAUDE.md", "AGENTS.md"],
         "plugin_companions": True,
         "plugin_store": "claude-cache",  # ~/.claude/plugins/cache
+        "plugin_cache": "~/.claude/plugins/cache",
         "tier_defaults": {
             "standard": {"model": "sonnet"},
             "strong": {"model": "opus"},
@@ -73,18 +75,20 @@ _PROFILES = {
         "tools": {
             "shell": "exec",
             "edit": ["edit", "write"],
-            # Devin also has an apply_patch tool; its patch-header paths are
-            # not parsed by the devin normalizer yet (same gap as Codex US23).
+            # Devin's apply_patch payload resembles Codex's; the devin
+            # normalizer extracts its patch-header paths like Codex's
             "patch": "apply_patch",
         },
         "resume_subagent": False,      # run_subagent/read_subagent, no resume
         "model_per_dispatch": False,   # run_subagent takes a profile, not a model
         "question_tool": None,
         "skill_dirs": ["~/.config/devin/skills", "~/.agents/skills"],
+        "flat_skill_files": False,
         "agent_dirs": ["~/.config/devin/agents"],
         "instruction_files": ["AGENTS.md", "CLAUDE.md"],
         "plugin_companions": True,     # devin plugins install; reads .claude-plugin
         "plugin_store": "devin-plugins",  # ~/.local/share/devin/cli/plugins
+        "plugin_cache": None,
         "tier_defaults": {
             "standard": {"model": "sonnet"},
             "strong": {"model": "opus"},
@@ -110,10 +114,12 @@ _PROFILES = {
         "model_per_dispatch": True,    # spawn_agent model parameter
         "question_tool": None,
         "skill_dirs": ["~/.agents/skills"],
+        "flat_skill_files": False,
         "agent_dirs": ["~/.codex/agents"],
         "instruction_files": ["AGENTS.md"],
         "plugin_companions": False,
         "plugin_store": None,
+        "plugin_cache": None,
         "tier_defaults": {
             # current Codex catalog (codex-cli 0.167): sol is the workhorse,
             # astra the flagship; reasoning effort low|medium|high|xhigh|max
@@ -143,10 +149,14 @@ _PROFILES = {
         "model_per_dispatch": True,   # task tool model param (v2 model_override permission)
         "question_tool": "question",
         "skill_dirs": ["~/.config/opencode/skills"],
+        # OpenCode discovers both <name>/SKILL.md dirs and flat <name>.md
+        # files at the skill source root
+        "flat_skill_files": True,
         "agent_dirs": ["~/.config/opencode/agents"],
         "instruction_files": ["AGENTS.md", "CLAUDE.md"],
         "plugin_companions": False,
         "plugin_store": None,
+        "plugin_cache": None,
         "tier_defaults": {
             "standard": {"model": "anthropic/claude-sonnet-4-5"},
             "strong": {"model": "anthropic/claude-opus-4-1"},

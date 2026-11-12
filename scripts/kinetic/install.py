@@ -92,6 +92,22 @@ def _link_entry(link: Path, target: Path):
             "sha256": _sha256_bytes(str(target).encode())}
 
 
+def _write_generated_files(generated: dict) -> None:
+    """Write every {path: text} generated file, creating parent dirs."""
+    for path, text in generated.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, text)
+
+
+def _generated_files(link: Path, launcher: Path, generated: dict) -> dict:
+    """Manifest 'files' entries: the launcher symlink plus every generated
+    file hashed by content (call after _write_generated_files)."""
+    files = {str(link): _link_entry(link, launcher)}
+    for path in generated:
+        files[str(path)] = {"type": "file", "sha256": _hash_file(path)}
+    return files
+
+
 def _ensure_link(link: Path, launcher: Path, prev_files: dict) -> int:
     """Point link at launcher, replacing only files a previous install wrote.
     A link already aimed at this launcher is accepted even when another
@@ -222,55 +238,81 @@ def _plugin_name(clone: Path) -> str:
     return "kinetic"
 
 
-def _devin_hook_spec() -> list:
-    """(event, matcher, script) triples mirroring hooks/hooks.json but with
-    Devin tool names taken from the harness profile."""
-    tools = harness.profile("devin")["tools"]
-    edit = "|".join(tools["edit"]) or "a^"  # matches nothing when empty
-    shell = tools["shell"]
-    write_ops = (f"^{shell}$"
-                 "|mcp__.*atlassian.*(create|edit|Edit|update|transition|"
-                 "[Cc]omment|executeWrite|executeDestructive).*"
-                 "|mcp__.*github.*(create_pull_request|merge_pull_request|"
-                 "update_pull_request|push_files|create_or_update_file|"
-                 "create_branch|delete_file).*")
+def _write_ops_matcher(shell: str) -> str:
+    """PreToolUse matcher for the shell tool plus tracker write MCP tools."""
+    return (f"^{shell}$"
+            "|mcp__.*atlassian.*(create|edit|Edit|update|transition|"
+            "[Cc]omment|executeWrite|executeDestructive).*"
+            "|mcp__.*github.*(create_pull_request|merge_pull_request|"
+            "update_pull_request|push_files|create_or_update_file|"
+            "create_branch|delete_file).*")
+
+
+def _hook_spec(edit_matcher: str, shell: str) -> list:
+    """(event, matcher, script) triples mirroring hooks/hooks.json for one
+    harness: edit_matcher covers the file-edit tools (the patch tool
+    included), shell the shell tool."""
     return [
-        ("PostToolUse", f"^({edit})$", "record_edit.py"),
+        ("PostToolUse", edit_matcher, "record_edit.py"),
         ("PostToolUse", f"^{shell}$", "claim_run.py"),
         ("Stop", "", "completion_gate.py"),
-        ("PreToolUse", f"^({edit})$", "isolation.py"),
-        ("PreToolUse", write_ops, "confirm_write_ops.py"),
+        ("PreToolUse", edit_matcher, "isolation.py"),
+        ("PreToolUse", _write_ops_matcher(shell), "confirm_write_ops.py"),
         ("PreToolUse", "mcp__.*deploy.*|mcp__.*tekton.*trigger.*",
          "confirm_deploy.py"),
         ("SessionStart", "", "orient.py"),
     ]
 
 
-def _devin_hook_groups(clone: Path) -> dict:
-    """{event: [matcher group, ...]} in Devin's hook config format."""
+def _edit_names(tools: dict, *extra: str) -> str:
+    """'|'-joined edit-tool matcher alternation: the profile's edit list,
+    its patch tool and any harness-specific aliases, deduped."""
+    names = list(tools.get("edit") or [])
+    if tools.get("patch") and tools["patch"] not in names:
+        names.append(tools["patch"])
+    names += [e for e in extra if e not in names]
+    return "|".join(names)
+
+
+def _devin_hook_spec() -> list:
+    """(event, matcher, script) triples mirroring hooks/hooks.json with
+    Devin tool names taken from the harness profile. Devin's apply_patch
+    is a file-edit tool too, so it joins the edit matcher (the devin
+    normalizer extracts its patch-header paths)."""
+    tools = harness.profile("devin")["tools"]
+    edit = _edit_names(tools) or "a^"  # matches nothing when empty
+    return _hook_spec(f"^({edit})$", tools["shell"])
+
+
+def _hook_groups(clone: Path, harness_id: str, spec: list) -> dict:
+    """{event: [matcher group, ...]} in the harness's hook config format."""
     groups = {}
-    for event, matcher, script in _devin_hook_spec():
+    for event, matcher, script in spec:
         groups.setdefault(event, []).append({
             "matcher": matcher,
             "hooks": [{"type": "command",
                        "command": f'python3 "{clone}/hooks/{script}.py"'
-                                  " --harness devin",
+                                  f" --harness {harness_id}",
                        "timeout": 10}]})
     return groups
+
+
+def _devin_hook_groups(clone: Path) -> dict:
+    """{event: [matcher group, ...]} in Devin's hook config format."""
+    return _hook_groups(clone, "devin", _devin_hook_spec())
+
+
+def _hook_commands(groups: dict) -> list:
+    """Every command string in a {event: [matcher group, ...]} hooks object."""
+    return [h["command"]
+            for event_groups in groups.values()
+            for g in event_groups for h in g["hooks"]]
 
 
 def devin_hook_commands(clone: Path) -> list:
     """The hook command strings the Devin installer writes into the Devin
     config; doctor compares these against what is actually registered."""
-    return [h["command"]
-            for groups in _devin_hook_groups(clone).values()
-            for g in groups for h in g["hooks"]]
-
-
-def _strip_kinetic_devin_hooks(hooks: dict) -> dict:
-    """hooks minus every kinetic (`--harness devin`) hook entry; groups left
-    empty are dropped. Malformed event values and groups are preserved."""
-    return _strip_marked_hooks(hooks, "--harness devin")
+    return _hook_commands(_devin_hook_groups(clone))
 
 
 def _merge_devin_config(cfg: dict, clone: Path) -> dict:
@@ -410,8 +452,10 @@ def _install_devin(clone: Path, home: Path) -> int:
 # Codex CLI
 #
 # `kinetic install --harness codex` is file generation only; it never shells
-# out to codex (the CLI is only required on PATH). Codex discovers skills
-# under ~/.agents/skills, sub-agent definitions under ~/.codex/agents/*.toml
+# out to codex, so the CLI is not required on PATH (like OpenCode it is only
+# reported when missing — hook trust is a manual /hooks step inside Codex
+# anyway). Codex discovers skills under ~/.agents/skills, sub-agent
+# definitions under ~/.codex/agents/*.toml
 # and hooks in ~/.codex/hooks.json — the same
 # {event: [{matcher, hooks: [{type, command, ...}]}]} shape Claude uses, so
 # foreign entries merge exactly like Devin's. Each skill becomes a
@@ -502,6 +546,26 @@ def _toml_instructions(body: str) -> str:
     return "'''\n" + text + "\n'''"
 
 
+def _skill_entry(skill_md: Path):
+    """(name, fields) for a skills/<name>/SKILL.md after the checks every
+    harness's skill generator shares: the frontmatter name must equal the
+    directory name and a description must be present."""
+    fields, _body = _split_frontmatter(skill_md)
+    # the directory name is what harnesses discover; frontmatter name must
+    # agree or the stub would point at the wrong source path
+    name = skill_md.parent.name
+    fm_name = fields.get("name")
+    if fm_name is not None and fm_name != name:
+        raise ValueError(
+            f"{skill_md}: frontmatter name {fm_name!r} != directory "
+            f"{name!r}")
+    desc = fields.get("description")
+    if not isinstance(desc, str) or not desc:
+        raise ValueError(
+            f"{skill_md}: frontmatter needs a description")
+    return name, fields
+
+
 def _codex_skill_files(clone: Path, skills_root: Path) -> dict:
     """{path: text} for every kntc-<name> stub skill, plus agents/openai.yaml
     sidecars for user-only skills (disable-model-invocation: true)."""
@@ -510,19 +574,8 @@ def _codex_skill_files(clone: Path, skills_root: Path) -> dict:
         raise ValueError(f"{skills_src} is missing; cannot generate skills")
     out = {}
     for skill_md in sorted(skills_src.glob("*/SKILL.md")):
-        fields, _body = _split_frontmatter(skill_md)
-        # the directory name is what Codex discovers; frontmatter name must
-        # agree or the stub would point at the wrong source path
-        name = skill_md.parent.name
-        fm_name = fields.get("name")
-        if fm_name is not None and fm_name != name:
-            raise ValueError(
-                f"{skill_md}: frontmatter name {fm_name!r} != directory "
-                f"{name!r}")
-        desc = fields.get("description")
-        if not isinstance(desc, str) or not desc:
-            raise ValueError(
-                f"{skill_md}: frontmatter needs a description")
+        name, fields = _skill_entry(skill_md)
+        desc = fields["description"]
         stub_dir = skills_root / f"kntc-{name}"
         out[stub_dir / "SKILL.md"] = (
             "---\n"
@@ -538,34 +591,49 @@ def _codex_skill_files(clone: Path, skills_root: Path) -> dict:
     return out
 
 
+def _agent_skills(fields: dict) -> list:
+    """The agent's skills: frontmatter list ([] when absent)."""
+    skills = fields.get("skills") or []
+    if isinstance(skills, str):
+        skills = [skills]
+    return [str(s) for s in skills]
+
+
+def _agent_entry(md: Path, harness_id: str, settings_path: Path):
+    """(name, fields, body, resolved) for agents/<name>.md after the checks
+    every harness's agent generator shares; the tier resolves through
+    harness.resolve_tier for harness_id so settings.json tiers apply."""
+    fields, body = _split_frontmatter(md)
+    name = md.stem
+    fm_name = fields.get("name")
+    if fm_name is not None and fm_name != name:
+        raise ValueError(f"{md}: frontmatter name {fm_name!r} != file {name!r}")
+    desc = fields.get("description")
+    tier = fields.get("tier")
+    if not isinstance(desc, str) or not desc \
+            or not isinstance(tier, str) or not tier:
+        raise ValueError(f"{md}: frontmatter needs description and tier")
+    try:
+        resolved = harness.resolve_tier(harness_id, tier,
+                                        settings=settings_path)
+    except harness.HarnessError as e:
+        raise ValueError(f"{md}: {e}")
+    return name, fields, body, resolved
+
+
 def _codex_agent_files(clone: Path, agents_root: Path,
                        settings_path: Path) -> dict:
     """{path: text} of ~/.codex/agents/<name>.toml generated from agents/*.md.
-    tier resolves through harness.resolve_tier so settings.json tiers apply;
-    the Claude-only frontmatter keys model/tools have no Codex agent
+    The Claude-only frontmatter keys model/tools have no Codex agent
     equivalent (tools are not restricted per-agent on Codex)."""
     agents_src = clone / "agents"
     if not agents_src.is_dir():
         raise ValueError(f"{agents_src} is missing; cannot generate agents")
     out = {}
     for md in sorted(agents_src.glob("*.md")):
-        fields, body = _split_frontmatter(md)
-        name = md.stem
-        fm_name = fields.get("name")
-        if fm_name is not None and fm_name != name:
-            raise ValueError(
-                f"{md}: frontmatter name {fm_name!r} != file {name!r}")
-        desc = fields.get("description")
-        tier = fields.get("tier")
-        if not isinstance(desc, str) or not desc \
-                or not isinstance(tier, str) or not tier:
-            raise ValueError(
-                f"{md}: frontmatter needs description and tier")
-        try:
-            resolved = harness.resolve_tier("codex", tier,
-                                            settings=settings_path)
-        except harness.HarnessError as e:
-            raise ValueError(f"{md}: {e}")
+        name, fields, body, resolved = _agent_entry(md, "codex",
+                                                    settings_path)
+        desc = fields["description"]
         lines = [
             f"name = {_toml_basic(name)}",
             f"description = {_toml_basic(desc)}",
@@ -576,12 +644,9 @@ def _codex_agent_files(clone: Path, agents_root: Path,
         if resolved.get("effort"):
             lines.append(
                 f"model_reasoning_effort = {_toml_basic(resolved['effort'])}")
-        skills = fields.get("skills") or []
-        if isinstance(skills, str):
-            skills = [skills]
-        for skill in skills:
+        for skill in _agent_skills(fields):
             lines += ["", "[[skills.config]]",
-                      f"name = {_toml_basic('kntc-' + str(skill))}",
+                      f"name = {_toml_basic('kntc-' + skill)}",
                       "enabled = true"]
         out[agents_root / f"{name}.toml"] = "\n".join(lines) + "\n"
     if not out:
@@ -594,222 +659,19 @@ def _codex_hook_spec() -> list:
     tool names. apply_patch is Codex's only file-edit tool; its matcher also
     answers to the Write/Edit aliases Codex registers for it."""
     tools = harness.profile("codex")["tools"]
-    edit = "apply_patch|Write|Edit"
-    shell = tools["shell"]  # "Bash"
-    write_ops = (f"^{shell}$"
-                 "|mcp__.*atlassian.*(create|edit|Edit|update|transition|"
-                 "[Cc]omment|executeWrite|executeDestructive).*"
-                 "|mcp__.*github.*(create_pull_request|merge_pull_request|"
-                 "update_pull_request|push_files|create_or_update_file|"
-                 "create_branch|delete_file).*")
-    return [
-        ("PostToolUse", edit, "record_edit.py"),
-        ("PostToolUse", f"^{shell}$", "claim_run.py"),
-        ("Stop", "", "completion_gate.py"),
-        ("PreToolUse", edit, "isolation.py"),
-        ("PreToolUse", write_ops, "confirm_write_ops.py"),
-        ("PreToolUse", "mcp__.*deploy.*|mcp__.*tekton.*trigger.*",
-         "confirm_deploy.py"),
-        ("SessionStart", "", "orient.py"),
-    ]
+    edit = _edit_names(tools, "Write", "Edit")
+    return _hook_spec(edit, tools["shell"])
 
 
 def codex_hook_groups(clone: Path) -> dict:
     """{event: [matcher group, ...]} in Codex's hooks.json format."""
-    groups = {}
-    for event, matcher, script in _codex_hook_spec():
-        groups.setdefault(event, []).append({
-            "matcher": matcher,
-            "hooks": [{"type": "command",
-                       "command": f'python3 "{clone}/hooks/{script}.py"'
-                                  " --harness codex",
-                       "timeout": 10}]})
-    return groups
+    return _hook_groups(clone, "codex", _codex_hook_spec())
 
 
 def codex_hook_commands(clone: Path) -> list:
     """The hook command strings the Codex installer writes into hooks.json;
     doctor compares these against what is actually registered."""
-    return [h["command"]
-            for groups in codex_hook_groups(clone).values()
-            for g in groups for h in g["hooks"]]
-
-
-def _is_kinetic_codex_hook(hook) -> bool:
-    return (isinstance(hook, dict)
-            and "--harness codex" in str(hook.get("command") or ""))
-
-
-def _codex_event_key(event: str) -> str:
-    """PreToolUse -> pre_tool_use (Codex's hooks.state key label)."""
-    s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", event)
-    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
-
-
-# Events whose matcher Codex ignores when hashing and matching
-# (matcher_pattern_for_event in codex-rs/hooks).
-_CODEX_NO_MATCHER_EVENTS = {"UserPromptSubmit", "Stop", "Interrupt",
-                            "PreModelRequest", "PostModelRequest"}
-# Events that may emit additionalContext; others ignore the limit.
-_CODEX_ACL_EVENTS = {"PreToolUse", "PostToolUse", "SessionStart",
-                     "UserPromptSubmit", "SubagentStart"}
-_CODEX_DEFAULT_ACL = 2500
-
-
-def _codex_timeout(event: str, raw) -> int:
-    """normalize_command_hook: SessionEnd/Interrupt default 1s capped 3s;
-    everything else defaults 600s, floor 1s."""
-    try:
-        t = int(raw) if raw is not None else None
-    except (TypeError, ValueError):
-        t = None
-    if event in ("SessionEnd", "Interrupt"):
-        return min(max(t if t is not None else 1, 1), 3)
-    return max(t if t is not None else 600, 1)
-
-
-def _codex_norm_handler(event: str, handler) -> dict | None:
-    """The HookHandlerConfig::Command fields that enter Codex's trust hash,
-    camelCased as serde emits them; None for non-command handlers."""
-    if not isinstance(handler, dict) or handler.get("type") != "command":
-        return None
-    command = handler.get("command")
-    if not isinstance(command, str):
-        return None
-    out = {"type": "command", "command": command,
-           "timeout": _codex_timeout(event, handler.get("timeout")),
-           "async": bool(handler.get("async", False))}
-    sm = handler.get("statusMessage")
-    if isinstance(sm, str):
-        out["statusMessage"] = sm
-    acl = handler.get("additionalContextLimit")
-    if isinstance(acl, int) and not isinstance(acl, bool) \
-            and event in _CODEX_ACL_EVENTS and acl != _CODEX_DEFAULT_ACL:
-        out["additionalContextLimit"] = acl
-    return out
-
-
-def _codex_hook_hash(event: str, matcher, handler_norm: dict) -> str:
-    """Codex's trusted_hash: sha256 of the sorted-key compact JSON of the
-    normalized hook identity (verified byte-for-byte against real
-    ~/.codex/config.toml [hooks.state] entries)."""
-    identity = {"event_name": _codex_event_key(event),
-                "hooks": [handler_norm]}
-    if event not in _CODEX_NO_MATCHER_EVENTS and matcher is not None:
-        identity["matcher"] = matcher
-    blob = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(blob.encode()).hexdigest()
-
-
-def codex_trust_entries(hooks_path: Path) -> list:
-    """Kinetic (--harness codex) command hooks in a Codex hooks.json, each
-    with the persisted trust key and expected hash that
-    ~/.codex/config.toml [hooks.state] must carry. [] when the file is
-    missing or unparseable."""
-    try:
-        cfg = json.loads(hooks_path.read_text())
-    except (OSError, ValueError):
-        return []
-    hooks = cfg.get("hooks") if isinstance(cfg, dict) else None
-    if not isinstance(hooks, dict):
-        return []
-    src = str(hooks_path)
-    out = []
-    for event, groups in hooks.items():
-        if not isinstance(groups, list):
-            continue
-        for gi, group in enumerate(groups):
-            ghooks = group.get("hooks") if isinstance(group, dict) else None
-            if not isinstance(ghooks, list):
-                continue
-            matcher = group.get("matcher") if isinstance(group, dict) else None
-            for hi, handler in enumerate(ghooks):
-                if not _is_kinetic_codex_hook(handler):
-                    continue
-                norm = _codex_norm_handler(str(event), handler)
-                if norm is None:
-                    continue
-                out.append({
-                    "event": str(event),
-                    "command": norm["command"],
-                    "key": f"{src}:{_codex_event_key(str(event))}:{gi}:{hi}",
-                    "hash": _codex_hook_hash(str(event), matcher, norm),
-                })
-    return out
-
-
-# [hooks.state."<key>"] table headers in a Codex config.toml.
-_CODEX_STATE_HEADER = re.compile(
-    r'^\s*\[hooks\.state\."((?:[^"\\]|\\.)*)"\]\s*$')
-_CODEX_STATE_KV = re.compile(r'^\s*([A-Za-z_]+)\s*=\s*(.+?)\s*$')
-
-
-def _toml_string(raw: str):
-    """Unquote a TOML basic-string literal well enough for state values."""
-    raw = raw.strip()
-    if len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"':
-        try:
-            return json.loads(raw)
-        except ValueError:
-            return raw[1:-1]
-    return raw.strip("'\"")
-
-
-def codex_hook_states(config_path: Path) -> dict:
-    """{state_key: {"trusted_hash": str|None, "enabled": bool|None}} parsed
-    from a Codex config.toml's [hooks.state."<key>"] tables. Targeted parse:
-    only the two keys Codex writes are read; the file need not be valid
-    TOML elsewhere."""
-    states = {}
-    try:
-        lines = config_path.read_text().splitlines()
-    except OSError:
-        return states
-    current = None
-    for line in lines:
-        m = _CODEX_STATE_HEADER.match(line)
-        if m:
-            current = m.group(1).replace('\\"', '"').replace("\\\\", "\\")
-            states.setdefault(current, {})
-            continue
-        if line.lstrip().startswith("["):
-            current = None
-            continue
-        if current is None:
-            continue
-        kv = _CODEX_STATE_KV.match(line)
-        if not kv:
-            continue
-        key, raw = kv.group(1), kv.group(2)
-        if key == "trusted_hash":
-            states[current]["trusted_hash"] = _toml_string(raw)
-        elif key == "enabled":
-            states[current]["enabled"] = raw.strip().lower() == "true"
-    return states
-
-
-def codex_trust_report(hooks_path: Path, config_path: Path) -> dict:
-    """How many kinetic hooks in hooks_path are trusted per config_path's
-    [hooks.state]: entries must carry the expected trusted_hash and must not
-    be disabled. State keys are tried under both the literal and resolved
-    hooks.json paths (CODEX_HOME/symlink spellings differ)."""
-    entries = codex_trust_entries(hooks_path)
-    states = codex_hook_states(config_path)
-    alt = str(hooks_path.resolve()) if hooks_path.exists() else None
-    untrusted = []
-    for e in entries:
-        keys = [e["key"]]
-        if alt and alt != str(hooks_path):
-            keys.append(e["key"].replace(str(hooks_path), alt, 1))
-        st = next((states[k] for k in keys if k in states), None)
-        ok = (st is not None
-              and st.get("enabled") is not False
-              and st.get("trusted_hash") == e["hash"])
-        if not ok:
-            untrusted.append(e)
-    return {"entries": len(entries),
-            "trusted": len(entries) - len(untrusted),
-            "untrusted": untrusted}
+    return _hook_commands(codex_hook_groups(clone))
 
 
 def _strip_marked_hooks(hooks: dict, marker: str) -> dict:
@@ -885,11 +747,6 @@ def _install_codex(clone: Path, home: Path) -> int:
     hooks_path = _codex_hooks_path(home)
     settings_path = _settings_path(home)
 
-    if shutil.which("codex") is None:
-        print("kinetic install: 'codex' CLI not found on PATH; install Codex "
-              "CLI first", file=sys.stderr)
-        return 1
-
     # Preflight everything that can fail before any file is written. The
     # settings check comes first: tier resolution reads it.
     try:
@@ -915,21 +772,16 @@ def _install_codex(clone: Path, home: Path) -> int:
         return 1
     sp, existed, previous = res
 
-    for path, text in generated.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, text)
+    _write_generated_files(generated)
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(hooks_path,
                  json.dumps(merged_hooks, indent=2, sort_keys=True) + "\n")
 
-    files = {str(link): _link_entry(link, launcher)}
-    for path in generated:
-        files[str(path)] = {"type": "file", "sha256": _hash_file(path)}
     manifest = {
         "version": MANIFEST_VERSION,
         "harness": "codex",
         "clone": str(clone),
-        "files": files,
+        "files": _generated_files(link, launcher, generated),
         "settings": _settings_manifest(sp, "codex", clone, existed, previous),
         "codex_hooks": {"path": str(hooks_path), "existed": hooks_existed},
     }
@@ -944,6 +796,11 @@ def _install_codex(clone: Path, home: Path) -> int:
     print(f"  hooks: {hooks_path} (merged, --harness codex)")
     print(f"  settings: harness=codex clone={clone} in {sp}")
     print(f"  manifest: {manifest_path}")
+    print()
+    if shutil.which("codex") is None:
+        print("note: 'codex' CLI not found on PATH; the generated files "
+              "still load next time Codex starts, but its hooks stay "
+              "inactive until trusted with /hooks.")
     print()
     print("Codex CLI: open Codex and run /hooks to review and trust "
           "kinetic's hooks — they stay inactive until trusted. "
@@ -1002,17 +859,8 @@ def _opencode_skill_files(clone: Path, skills_root: Path) -> dict:
         raise ValueError(f"{skills_src} is missing; cannot generate skills")
     out = {}
     for skill_md in sorted(skills_src.glob("*/SKILL.md")):
-        fields, _body = _split_frontmatter(skill_md)
-        name = skill_md.parent.name
-        fm_name = fields.get("name")
-        if fm_name is not None and fm_name != name:
-            raise ValueError(
-                f"{skill_md}: frontmatter name {fm_name!r} != directory "
-                f"{name!r}")
-        desc = fields.get("description")
-        if not isinstance(desc, str) or not desc:
-            raise ValueError(
-                f"{skill_md}: frontmatter needs a description")
+        name, fields = _skill_entry(skill_md)
+        desc = fields["description"]
         fm = ["---",
               f"name: kntc-{name}",
               f"description: {json.dumps('kinetic: ' + desc, ensure_ascii=False)}"]
@@ -1065,6 +913,24 @@ def _opencode_permissions(fields: dict) -> list:
     return denies
 
 
+def _opencode_agent_body(fields: dict, body: str, clone: Path) -> str:
+    """Rewrite the source body's 'The `<skill>` skill is preloaded' claim.
+    OpenCode agent frontmatter has no skill-preload mechanism (unlike
+    Claude's skills: list or Codex's [[skills.config]]), so the generated
+    agent is pointed at the clone's skill file instead."""
+    for skill in _agent_skills(fields):
+        claim = re.compile(r"The `" + re.escape(skill)
+                           + r"` skill is preloaded([^.\n]*)\.")
+
+        def _repl(m, skill=skill):
+            tail = m.group(1).lstrip(" :")
+            text = (f"On OpenCode the `{skill}` skill is not preloaded — "
+                    f"read `{clone}/skills/{skill}/SKILL.md`")
+            return text + (f" and {tail}." if tail else ".")
+        body = claim.sub(_repl, body)
+    return body
+
+
 def _opencode_agent_files(clone: Path, agents_root: Path,
                           settings_path: Path) -> dict:
     """{path: text} of ~/.config/opencode/agents/<name>.md generated from
@@ -1077,23 +943,9 @@ def _opencode_agent_files(clone: Path, agents_root: Path,
         raise ValueError(f"{agents_src} is missing; cannot generate agents")
     out = {}
     for md in sorted(agents_src.glob("*.md")):
-        fields, body = _split_frontmatter(md)
-        name = md.stem
-        fm_name = fields.get("name")
-        if fm_name is not None and fm_name != name:
-            raise ValueError(
-                f"{md}: frontmatter name {fm_name!r} != file {name!r}")
-        desc = fields.get("description")
-        tier = fields.get("tier")
-        if not isinstance(desc, str) or not desc \
-                or not isinstance(tier, str) or not tier:
-            raise ValueError(
-                f"{md}: frontmatter needs description and tier")
-        try:
-            resolved = harness.resolve_tier("opencode", tier,
-                                            settings=settings_path)
-        except harness.HarnessError as e:
-            raise ValueError(f"{md}: {e}")
+        name, fields, body, resolved = _agent_entry(md, "opencode",
+                                                    settings_path)
+        desc = fields["description"]
         fm = ["---",
               f"description: {json.dumps(desc, ensure_ascii=False)}",
               "mode: subagent"]
@@ -1108,7 +960,8 @@ def _opencode_agent_files(clone: Path, agents_root: Path,
                        f"  effect: {p['effect']}"]
         fm.append("---")
         out[agents_root / f"{name}.md"] = (
-            "\n".join(fm) + "\n\n" + body.strip("\n") + "\n")
+            "\n".join(fm) + "\n\n"
+            + _opencode_agent_body(fields, body.strip("\n"), clone) + "\n")
     if not out:
         raise ValueError(f"{agents_src}: no agents found")
     return out
@@ -1168,18 +1021,13 @@ def _install_opencode(clone: Path, home: Path) -> int:
         return 1
     sp, existed, previous = res
 
-    for path, text in generated.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, text)
+    _write_generated_files(generated)
 
-    files = {str(link): _link_entry(link, launcher)}
-    for path in generated:
-        files[str(path)] = {"type": "file", "sha256": _hash_file(path)}
     manifest = {
         "version": MANIFEST_VERSION,
         "harness": "opencode",
         "clone": str(clone),
-        "files": files,
+        "files": _generated_files(link, launcher, generated),
         "settings": _settings_manifest(sp, "opencode", clone, existed, previous),
     }
     atomic_write(manifest_path,
@@ -1210,9 +1058,10 @@ def _install_opencode(clone: Path, home: Path) -> int:
     return 0
 
 
-def _strip_codex_hooks(path: Path, existed: bool):
-    """Remove kinetic's `--harness codex` hooks from a Codex hooks.json,
-    preserving everything else. Returns a warning or None."""
+def _strip_marked_config(path: Path, existed: bool, marker: str):
+    """Remove every hook entry whose command contains marker from a JSON
+    config's "hooks" object (a Codex hooks.json or a Devin config.json —
+    same shape), preserving everything else. Returns a warning or None."""
     if not path.is_file():
         return None
     try:
@@ -1223,7 +1072,7 @@ def _strip_codex_hooks(path: Path, existed: bool):
         return f"left {path}: not a JSON object"
     hooks = cfg.get("hooks")
     if isinstance(hooks, dict):
-        stripped = _strip_marked_hooks(hooks, "--harness codex")
+        stripped = _strip_marked_hooks(hooks, marker)
         if stripped:
             cfg["hooks"] = stripped
         else:
@@ -1278,36 +1127,6 @@ def _other_manifest_files(home: Path, harness_id: str) -> set:
         if m:
             claimed.update((m.get("files") or {}).keys())
     return claimed
-
-
-def _strip_devin_config(path: Path, existed: bool):
-    """Remove kinetic's `--harness devin` hooks from a Devin config.json,
-    preserving everything else. Returns a warning or None."""
-    if not path.is_file():
-        return None
-    try:
-        cfg = json.loads(path.read_text())
-    except (OSError, ValueError) as e:
-        return f"left {path}: {e}"
-    if not isinstance(cfg, dict):
-        return f"left {path}: not a JSON object"
-    hooks = cfg.get("hooks")
-    if isinstance(hooks, dict):
-        stripped = _strip_kinetic_devin_hooks(hooks)
-        if stripped:
-            cfg["hooks"] = stripped
-        else:
-            cfg.pop("hooks", None)
-    elif hooks is not None:
-        return f"left {path}: 'hooks' is not an object; kinetic hooks may remain"
-    if not cfg:
-        if existed:
-            atomic_write(path, "{}\n")
-        else:
-            path.unlink()
-        return None
-    atomic_write(path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
-    return None
 
 
 def _uninstall(harness_id: str, home: Path) -> int:
@@ -1366,7 +1185,8 @@ def _uninstall(harness_id: str, home: Path) -> int:
     dconf = manifest.get("devin_config")
     if isinstance(dconf, dict) and dconf.get("path"):
         dpath = Path(dconf["path"])
-        warn = _strip_devin_config(dpath, bool(dconf.get("existed")))
+        warn = _strip_marked_config(dpath, bool(dconf.get("existed")),
+                                    "--harness devin")
         if warn:
             warnings.append(warn)
         elif dpath.exists():
@@ -1375,7 +1195,8 @@ def _uninstall(harness_id: str, home: Path) -> int:
     cconf = manifest.get("codex_hooks")
     if isinstance(cconf, dict) and cconf.get("path"):
         cpath = Path(cconf["path"])
-        warn = _strip_codex_hooks(cpath, bool(cconf.get("existed")))
+        warn = _strip_marked_config(cpath, bool(cconf.get("existed")),
+                                    "--harness codex")
         if warn:
             warnings.append(warn)
         elif cpath.exists():
@@ -1460,17 +1281,9 @@ def main(argv=None) -> int:
     if err:
         print(f"kinetic install: {err}", file=sys.stderr)
         return 1
-    if a.harness == "claude":
-        return _install_claude(clone, home)
-    if a.harness == "devin":
-        return _install_devin(clone, home)
-    if a.harness == "codex":
-        return _install_codex(clone, home)
-    if a.harness == "opencode":
-        return _install_opencode(clone, home)
-    print(f"kinetic install: --harness {a.harness} is not yet supported",
-          file=sys.stderr)
-    return 1
+    installers = {"claude": _install_claude, "devin": _install_devin,
+                  "codex": _install_codex, "opencode": _install_opencode}
+    return installers[a.harness](clone, home)
 
 
 if __name__ == "__main__":

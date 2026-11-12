@@ -463,6 +463,72 @@ class DevinHooks(HookCase):
                                    "session_id": "s1", "prompt_id": "p1"}, cwd=self.repo)
         self.assertTrue(state.load(self.run_dir)["repos"]["api"]["last_edit_at"])
 
+    # Devin's apply_patch payload shape is undocumented; the normalizer tries
+    # the spellings the other harnesses use, with tool_input.command first.
+    def patch(self, *sections):
+        return "*** Begin Patch\n" + "".join(sections) + "*** End Patch"
+
+    def update(self, path, body="@@\n-old\n+new\n"):
+        return f"*** Update File: {path}\n{body}"
+
+    def apply_patch(self, command=None, tool_input=None, event="PreToolUse"):
+        ti = {"command": command} if tool_input is None else tool_input
+        return {"hook_event_name": event, "tool_name": "apply_patch",
+                "tool_input": ti, "session_id": "s1", "prompt_id": "p1"}
+
+    def test_apply_patch_outside_is_denied(self):
+        self.activate()
+        out = self.devin("isolation",
+                         self.apply_patch(self.patch(self.update("/etc/passwd"))),
+                         cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("outside the run workspace", out["reason"])
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_apply_patch_inside_repo_run_dir_and_relative_allowed(self):
+        self.activate()
+        for path in (str(self.repo / "a.py"), str(self.run_dir / "spec.md"),
+                     "sub/rel.py"):
+            out = self.devin("isolation",
+                             self.apply_patch(self.patch(self.update(path))),
+                             cwd=self.repo)
+            self.assertIsNone(out, path)
+
+    def test_apply_patch_multi_file_any_outside_denies(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "ok.py")),
+                           self.update("/etc/evil.py"))
+        out = self.devin("isolation", self.apply_patch(patch), cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("evil.py", out["reason"])
+
+    def test_apply_patch_alternate_input_spelling(self):
+        self.activate()
+        out = self.devin("isolation",
+                         self.apply_patch(tool_input={"patch": self.patch(
+                             self.update("/etc/passwd"))}),
+                         cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+
+    def test_apply_patch_unparseable_asks(self):
+        self.activate()
+        out = self.devin("isolation",
+                         self.apply_patch("not a patch at all"), cwd=self.repo)
+        self.assertIsNone(out.get("decision"))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_apply_patch_record_edit_stamps_each_path(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "a.py")),
+                           self.update(str(self.run_dir / "notes.md")))
+        self.devin("record_edit",
+                   self.apply_patch(patch, event="PostToolUse"), cwd=self.repo)
+        st = state.load(self.run_dir)
+        self.assertTrue(st["repos"]["api"]["last_edit_at"])
+        # run-dir artifacts are not code: the run_dir path must not stamp
+        # the top-level last_edit_at
+        self.assertFalse(st["last_edit_at"])
+
     def test_stop_gate_blocks_in_devin_shape(self):
         self.activate()
         self.stamp(repo_edit=T3)
