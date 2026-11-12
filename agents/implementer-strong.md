@@ -52,7 +52,7 @@ Stopping early is never penalized; bad work is worse than no work. Report instea
 ## Procedure
 
 1. Read the ticket and the spec sections it points to.
-2. Work test-first per the `tdd` skill. Before writing the fix, run the new test and save its failing output to `<run_dir>/logs/<id>-red.log` (use `tee`); that is your RED evidence. Commit when green.
+2. Work test-first per the `tdd` skill. Before writing the fix, run the new test through `kinetic red --run <run_dir> --ticket <id> --repo-path <worktree> --command "<the focused test command>"`. It runs the command, logs the output and records the failure as your RED evidence; it exits 0 only when the test failed, and exits 1 ("not a RED") when it passed, which means fix the test, not the code. The orchestrator cannot mark the ticket done without a RED record, except `TDD: n/a`. Commit when green.
 3. Self-review your own diff (`git diff` against the integration branch) before verifying, and fix what fails:
    - Completeness: every acceptance criterion is implemented and tested; edge cases the criteria imply are handled.
    - Discipline: nothing beyond the ticket; existing patterns followed; nothing restructured outside the ticket.
@@ -98,7 +98,7 @@ Status: DONE
 Ticket: <id>
 Branch: <ticket branch>
 Verify: <log_path from verify output>
-TDD: <failing test name(s)>; RED <run_dir>/logs/<id>-red.log
+TDD: <failing test name(s)>; RED <log_path from kinetic red>
 Self-review: <none or what you fixed>
 Questions: <none or list>
 Concerns: <none or list>
