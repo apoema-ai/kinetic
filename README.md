@@ -1,6 +1,6 @@
 # kinetic
 
-kinetic is a Claude Code plugin that drives a software change from idea to draft PRs across one or more repositories: grill the idea, write a spec, split it into tickets with typed dependency edges, build each ticket with an isolated implementer, review, ship, and run a retro.
+kinetic is a plugin that drives a software change from idea to draft PRs across one or more repositories: grill the idea, write a spec, split it into tickets with typed dependency edges, build each ticket with an isolated implementer, review, ship, and run a retro. It runs inside Claude Code and Devin CLI (Codex CLI and OpenCode support is in progress).
 
 The split of work is deliberate:
 
@@ -40,16 +40,22 @@ It merges ideas from three plugins: Matt Pocock's skills (grill, spec, tickets, 
 
 Requirements: macOS or Linux, Python 3.9+, `git`, and `gh` authenticated to GitHub. Jira mode also needs the Atlassian MCP server; GitHub issues mode needs `gh` with issue access; Linear mode needs a Linear MCP server.
 
-For local use, install from a checkout:
+For local use, install from a checkout. Claude Code:
 
 ```
 <path-to-kinetic>/bin/kinetic install --harness claude
 claude --plugin-dir <path-to-kinetic>
 ```
 
-`kinetic install` links `kinetic` onto your PATH (`~/.local/bin` — make sure that directory is on your PATH), records the harness and clone in `~/.config/kinetic/settings.json`, and writes an install manifest that `doctor` checks for staleness. Re-run it after `git pull`; `kinetic install --harness claude --uninstall` removes everything it wrote. Plugin registration itself (`claude --plugin-dir`) stays manual.
+Devin CLI:
 
-Optional companions that kinetic uses when present and falls back without: the `find-ticket-repos`, `checkout-ticket-repos` and `resolving-merge-conflicts` skills under `~/.claude/skills`, and the `superpowers` and `dev-fleet` plugins (for `receiving-code-review`, `architecture-review` and `release`). `/kinetic:doctor` reports which are missing.
+```
+<path-to-kinetic>/bin/kinetic install --harness devin
+```
+
+`kinetic install` links `kinetic` onto your PATH (`~/.local/bin` — make sure that directory is on your PATH), records the harness and clone in `~/.config/kinetic/settings.json`, and writes an install manifest that `doctor` checks for staleness. Re-run it after `git pull`; `kinetic install --harness <h> --uninstall` removes everything it wrote. On Claude Code, plugin registration itself (`claude --plugin-dir`) stays manual; on Devin CLI the installer runs `devin plugins install --local <clone>` itself (skills appear as `/kinetic:<name>`) and writes Devin-format hooks into `~/.config/devin/config.json`, preserving any foreign entries. Devin support is validated by the manual checklist in `docs/smoke/devin.md`.
+
+Optional companions that kinetic uses when present and falls back without: the `find-ticket-repos`, `checkout-ticket-repos` and `resolving-merge-conflicts` skills and the `superpowers` and `dev-fleet` plugins, installed wherever the harness keeps skills and plugins (`~/.claude/skills` and `~/.claude/plugins` on Claude Code; `~/.config/devin/skills` or `~/.agents/skills` and `devin plugins install` on Devin CLI). `/kinetic:doctor` reports which are missing.
 
 ## Quick start
 

@@ -51,6 +51,7 @@ _PROFILES = {
         "agent_dirs": ["~/.claude/agents"],
         "instruction_files": ["CLAUDE.md", "AGENTS.md"],
         "plugin_companions": True,
+        "plugin_store": "claude-cache",  # ~/.claude/plugins/cache
         "tier_defaults": {
             "standard": {"model": "sonnet"},
             "strong": {"model": "opus"},
@@ -72,7 +73,9 @@ _PROFILES = {
         "tools": {
             "shell": "exec",
             "edit": ["edit", "write"],
-            "patch": None,
+            # Devin also has an apply_patch tool; its patch-header paths are
+            # not parsed by the devin normalizer yet (same gap as Codex US23).
+            "patch": "apply_patch",
         },
         "resume_subagent": False,      # run_subagent/read_subagent, no resume
         "model_per_dispatch": False,   # run_subagent takes a profile, not a model
@@ -81,6 +84,7 @@ _PROFILES = {
         "agent_dirs": ["~/.config/devin/agents"],
         "instruction_files": ["AGENTS.md", "CLAUDE.md"],
         "plugin_companions": True,     # devin plugins install; reads .claude-plugin
+        "plugin_store": "devin-plugins",  # ~/.local/share/devin/cli/plugins
         "tier_defaults": {
             "standard": {"model": "sonnet"},
             "strong": {"model": "opus"},
@@ -109,6 +113,7 @@ _PROFILES = {
         "agent_dirs": ["~/.codex/agents"],
         "instruction_files": ["AGENTS.md"],
         "plugin_companions": False,
+        "plugin_store": None,
         "tier_defaults": {
             "standard": {"model": "gpt-5.1-codex", "effort": "medium"},
             "strong": {"model": "gpt-5.1-codex", "effort": "high"},
@@ -137,6 +142,7 @@ _PROFILES = {
         "agent_dirs": ["~/.config/opencode/agents"],
         "instruction_files": ["AGENTS.md", "CLAUDE.md"],
         "plugin_companions": False,
+        "plugin_store": None,
         "tier_defaults": {
             "standard": {"model": "anthropic/claude-sonnet-4-5"},
             "strong": {"model": "anthropic/claude-opus-4-1"},
