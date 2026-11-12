@@ -76,7 +76,7 @@ def init(run_dir, lane: str, ref: str, force: bool = False) -> dict:
     state = {
         "run_id": uuid.uuid4().hex[:12], "run_dir": str(run_dir), "lane": lane,
         "ref": ref, "phase": "intake", "tickets": {}, "slices": [], "repos": {},
-        "gates": {}, "rulings": [], "verify": {}, "last_edit_at": None,
+        "gates": {}, "rulings": [], "verify": {}, "red": {}, "last_edit_at": None,
     }
     with open(Path(run_dir) / "state.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -201,6 +201,27 @@ def done_refusal(state: dict, ticket_id: str):
     return None
 
 
+def red_refusal(state: dict, ticket_id: str, run_dir):
+    """Why ticket_id may not be marked done for lack of RED evidence, or None.
+
+    Needs a recorded failing test run (`kinetic red`), unless the ticket's report
+    says `TDD: n/a` (a ticket that changes no behaviour). A state without a "red"
+    map predates this rule and is not enforced, so runs in flight keep working."""
+    if "red" not in state:
+        return None
+    rec = state["red"].get(ticket_id)
+    if rec and rec.get("exit_code") != 0:
+        return None
+    report = Path(run_dir) / "reports" / f"{ticket_id}.md"
+    if report.is_file() and any(line.startswith("TDD: n/a")
+                                for line in report.read_text().splitlines()[:30]):
+        return None
+    wt = state["tickets"].get(ticket_id, {}).get("worktree") or "<worktree>"
+    return (f"ticket {ticket_id}: no RED record; run `kinetic red --run {shlex.quote(str(run_dir))} "
+            f"--ticket {ticket_id} --repo-path {shlex.quote(str(wt))} --command '<failing test command>'` "
+            "before the fix, or report `TDD: n/a: <reason>` when the ticket changes no behaviour")
+
+
 KINDS = ("agent", "human")
 
 
@@ -242,7 +263,7 @@ def set_ticket(run_dir, ticket_id: str, require_verify: bool = False, **fields) 
                 raise ValueError(f"ticket {ticket_id} is a human ticket: mark it done with "
                                  "`kinetic.state human-done`")
             if require_verify:
-                reason = done_refusal(state, ticket_id)
+                reason = done_refusal(state, ticket_id) or red_refusal(state, ticket_id, run_dir)
                 if reason:
                     raise ValueError(reason)
         t = state["tickets"].setdefault(ticket_id, ticket_defaults())
@@ -287,6 +308,18 @@ def record_verify(run_dir, ticket_id, exit_code: int, log_path: str, repo_name=N
         repo = repo_name or s["tickets"].get(ticket_id, {}).get("repo")
         s["verify"][key] = {"exit_code": exit_code, "log_path": log_path, "at": stamp,
                             "repo": repo}
+    _mutate(run_dir, fn)
+
+
+def record_red(run_dir, ticket_id: str, exit_code: int, log_path: str, command: str,
+               at: str | None = None) -> None:
+    """Record a failing test run for a ticket: the RED half of red -> green.
+    Callers pass the test command's own exit code; red_refusal counts it only if non-zero."""
+    stamp = at or _now()
+
+    def fn(s):
+        s.setdefault("red", {})[ticket_id] = {"exit_code": exit_code, "log_path": log_path,
+                                              "command": command, "at": stamp}
     _mutate(run_dir, fn)
 
 

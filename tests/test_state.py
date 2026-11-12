@@ -41,7 +41,7 @@ class StateTest(unittest.TestCase):
     def test_init_writes_schema(self):
         s = state.init(self.run_dir, "feature", "ABC-1")
         for key in ("run_id", "lane", "ref", "phase", "tickets", "gates",
-                    "rulings", "verify", "last_edit_at"):
+                    "rulings", "verify", "red", "last_edit_at"):
             self.assertIn(key, s)
         self.assertEqual(s["phase"], "intake")
         self.assertEqual(state.load(self.run_dir), s)
@@ -316,14 +316,52 @@ class CliTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("edited after", r.stderr)
 
-    def test_cli_allows_done_after_passing_verify(self):
+    def _verified_ticket(self):
+        """T1 in repo api with a passing verify newer than its last edit."""
         self._ticket_in_repo()
         state._mutate(self.run_dir, lambda s: s["repos"].setdefault("api", {}).update(
             last_edit_at="2026-01-01T00:00:00.000000+00:00", last_edit_ticket="T1"))
         state.record_verify(self.run_dir, "T1", 0, "l", at="2026-01-01T00:00:05.000000+00:00")
-        r = self.cli("set-ticket", "--id", "T1", "--field", "status=done")
+
+    def _done(self):
+        return self.cli("set-ticket", "--id", "T1", "--field", "status=done")
+
+    def test_cli_allows_done_after_passing_verify_and_red(self):
+        self._verified_ticket()
+        state.record_red(self.run_dir, "T1", 1, "l", "pytest t")
+        r = self._done()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(state.load(self.run_dir)["tickets"]["T1"]["status"], "done")
+
+    def test_cli_refuses_done_without_red_record(self):
+        self._verified_ticket()
+        r = self._done()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no RED record", r.stderr)
+        self.assertIn("kinetic red", r.stderr)
+        self.assertEqual(state.load(self.run_dir)["tickets"]["T1"]["status"], "todo")
+
+    def test_cli_refuses_done_when_the_only_red_record_passed(self):
+        self._verified_ticket()
+        state.record_red(self.run_dir, "T1", 0, "l", "pytest t")
+        self.assertEqual(self._done().returncode, 1)
+
+    def test_cli_allows_done_when_report_says_tdd_not_applicable(self):
+        self._verified_ticket()
+        reports = Path(self.run_dir) / "reports"
+        reports.mkdir()
+        (reports / "T1.md").write_text("Status: DONE\nTicket: T1\nTDD: n/a: version bump only\n")
+        self.assertEqual(self._done().returncode, 0)
+
+    def test_cli_red_of_another_ticket_does_not_count(self):
+        self._verified_ticket()
+        state.record_red(self.run_dir, "T2", 1, "l", "pytest t")
+        self.assertEqual(self._done().returncode, 1)
+
+    def test_state_without_red_map_is_not_enforced(self):  # runs created before the rule
+        self._verified_ticket()
+        state._mutate(self.run_dir, lambda s: s.pop("red"))
+        self.assertEqual(self._done().returncode, 0)
 
     def test_python_set_ticket_does_not_require_verify(self):
         self._ticket_in_repo()
