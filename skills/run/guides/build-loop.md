@@ -25,7 +25,7 @@ You stay thin: never read code or full diffs. Read only script JSON, the first l
    - Ticket file: in local mode the tickets skill already wrote `<run_dir>/issues/<id>.md`. For a quick-lane or `--from build` ticket, write `<run_dir>/issues/<id>.md` yourself from the ref (copy the ticket file if the ref is one; otherwise write the title and acceptance criteria from the ref's text or the issue fetched through the adapter) before dispatch.
    - Worktree: `kinetic gitops worktree --repo <repo's integration worktree> --dest <run_dir>/worktrees/<repo>-<id> --branch kinetic/<run-id>/<id> --base kinetic/<run-id>/integration`, then `set-ticket --id <id> --field branch=kinetic/<run-id>/<id>` and `set-ticket --id <id> --field worktree=<run_dir>/worktrees/<repo>-<id>`. If the worktree already exists (recovery), keep it.
    - Mark it running first, so a crash cannot leave a live worktree marked `todo`: `kinetic state set-ticket --run <run_dir> --id <id> --field status=running`.
-4. Dispatch every prepared ticket in ONE message: one `implementer` agent call per id, each with `run_in_background: true`. Each brief is exactly these lines:
+4. Start every prepared ticket in parallel, each `implementer` in the background: one dispatch per id, all at once. Each brief is exactly these lines:
 
 ```
 Run: <run_dir>
@@ -42,6 +42,15 @@ Grant: <the Grant line from gates.md>
 
 `Tracker adapter:` is the literal path the `adapter` key of `kinetic tracker resolve` gives. Agents run `kinetic <module>` commands like you do; `kinetic` is on their PATH. `Docs:` holds the glossary and ADR drafts the grill phase wrote (it may not exist).
 
+## Resume or fresh implementer
+
+`kinetic harness` (run preflight) reports `Resume sub-agent: yes|no` for the active harness. Whenever a running implementer needs more input — a `Fix:` file, an answer to its `Questions:`, a ruling — pick the path from that line:
+
+- **yes**: resume the same implementer with the input; it keeps its context.
+- **no, or the resume fails**: start a fresh `implementer` on the same worktree (same branch, same `Repo:`) with the normal brief plus `Previous report: <run_dir>/reports/<id>.md` and the input on its own line — `Fix: <findings file>`, `Answer: <the supplied context>`, or `Ruling: <n>` where `<n>` is the ruling's 1-based position in the run's `rulings` list in state.json (`add-ruling` prints the whole list; the new entry is last). On fix round 3 the fresh dispatch is `implementer-strong` instead.
+
+Both paths rely only on saved state — the report file, the worktree, the rulings — never on a live agent's context, so a harness that cannot resume and an agent that died take the same fresh path; `recovery.md` uses it too.
+
 ## On each implementer return
 
 Read only the first lines of `<run_dir>/reports/<id>.md` (the `Status:` line, then Branch, Verify, Questions, Concerns).
@@ -49,13 +58,13 @@ Read only the first lines of `<run_dir>/reports/<id>.md` (the `Status:` line, th
 **DONE or DONE_WITH_CONCERNS**
 
 1. Set the ticket `done` or `done_with_concerns` with `set-ticket --field status=done` (or `done_with_concerns`). The CLI refuses unless the ticket has a passing verify newer than its last edit. A report is a claim; the verify record is the evidence. On a refusal, treat the return as BLOCKED: show the refusal to the user, then either resume the implementer to re-run verify or keep the ticket `running`.
-2. Note the ticket branch head (`git -C <ticket worktree> rev-parse HEAD`) as the review base for any fix round. Dispatch `standards-reviewer` and `spec-reviewer` in one message with the briefs their agent files define: `Run`, `Ticket`, `Repo` (the ticket worktree), `Diff: kinetic/<run-id>/integration...kinetic/<run-id>/<id>`, `Ticket ref: <id>`, `Tracker adapter: <path>`, `Ticket file: <run_dir>/issues/<id>.md` (local mode only) and `Output file: <run_dir>/reviews/<id>-<axis>.md`. Save each reply to `<run_dir>/reviews/<id>-standards.md` and `<run_dir>/reviews/<id>-spec.md` (the reviewers return text; you write the file). Apply the reviewer read-only check below to the ticket worktree for this dispatch.
+2. Note the ticket branch head (`git -C <ticket worktree> rev-parse HEAD`) as the review base for any fix round. Dispatch `standards-reviewer` and `spec-reviewer` in parallel with the briefs their agent files define: `Run`, `Ticket`, `Repo` (the ticket worktree), `Diff: kinetic/<run-id>/integration...kinetic/<run-id>/<id>`, `Ticket ref: <id>`, `Tracker adapter: <path>`, `Ticket file: <run_dir>/issues/<id>.md` (local mode only) and `Output file: <run_dir>/reviews/<id>-<axis>.md`. Save each reply to `<run_dir>/reviews/<id>-standards.md` and `<run_dir>/reviews/<id>-spec.md` (the reviewers return text; you write the file). Apply the reviewer read-only check below to the ticket worktree for this dispatch.
 3. Weigh the findings with `superpowers:receiving-code-review` if available (otherwise judge each finding against the ticket's acceptance criteria and verify it before acting). Do not act on a finding you cannot confirm. Both verdicts Approved, or no confirmed Critical or Important finding: go to step 5.
 4. **Fix rounds**, at most 3 per ticket. Before each round set the ticket back to `running` (`set-ticket --field status=running`; this keeps its repo occupied and keeps the Stop gate off it) and write the confirmed findings for round N, one per line with an id (`F1`, `F2`, ...), to `<run_dir>/reviews/<id>-findings-N.md`.
-   - **Rounds 1 and 2**: resume the same implementer with SendMessage: `Fix: <run_dir>/reviews/<id>-findings-N.md`. It keeps its context, fixes only those findings, re-verifies and appends a `## Fix round N` section to its report.
-   - **Round 3**: dispatch a fresh `implementer` with `model: "opus"` and the normal brief plus the `Fix:` line. A stronger model with fresh eyes, since two rounds on the first one did not converge. If the first implementer cannot be resumed (a new session), round 1 or 2 uses a fresh sonnet implementer the same way.
+   - **Rounds 1 and 2**: send `Fix: <run_dir>/reviews/<id>-findings-N.md` to the implementer — resume it where the harness can, else the fresh-implementer path above. It fixes only those findings, re-verifies and appends a `## Fix round N` section to its report.
+   - **Round 3**: dispatch a fresh `implementer-strong` with the normal brief plus the `Fix:` line. A stronger model with fresh eyes, since two rounds on the first one did not converge. Rounds 1 and 2 already take the fresh path when the harness cannot resume or the resume fails (see above).
    - After each round, dispatch `fix-reviewer` (brief in its agent file; `Fix diff: <review base>..<new head>`; `Output file: <run_dir>/reviews/<id>-fix-N.md`) instead of the two full reviewers, and save its reply. Run the same reviewer read-only check on the ticket worktree around this dispatch. Its Out of scope items do not extend the loop: append them to `<run_dir>/reviews/out-of-scope.md` for the integration review. `Verdict: Approved`: set the ticket `done` again as in step 1, then go to step 5. Otherwise the review base becomes the new head and the open findings go to the next round.
-   - **After round 3, adjudicate** each finding still open. One that blocks an acceptance criterion, the threat model or a contract other repos rely on goes to the user (AskUserQuestion: fix it yourself, accept it, or stop). Any other is recorded as a ruling (`add-ruling --what "<finding>" --why "<why it does not block>" --cost "<what it costs if wrong>"`) and the ticket proceeds.
+   - **After round 3, adjudicate** each finding still open. One that blocks an acceptance criterion, the threat model or a contract other repos rely on goes to the user (ask with the harness's question tool when the profile names one, chat otherwise: fix it yourself, accept it, or stop). Any other is recorded as a ruling (`add-ruling --what "<finding>" --why "<why it does not block>" --cost "<what it costs if wrong>"`) and the ticket proceeds.
    - After a crash during a fix round, recovery cannot tell a dead fix agent from a finished first round (`reports/<id>.md` already exists): check the report's latest `## Fix round` section and `reviews/<id>-fix-N.md` by hand.
 5. Merge: `kinetic gitops merge --repo <the repo's integration worktree, its path in state> --ticket-branch kinetic/<run-id>/<id> --integration-branch kinetic/<run-id>/integration`. Exit 0 and `merged: true`: set the ticket `merged`. On conflicts, follow `resolving-merge-conflicts` if available; if not, stop and ask the user. Never resolve by discarding the ticket's work.
 6. Pin downstream: for every repo that has a ticket with a `snapshot` edge on this ticket's repo, run `kinetic gitops pin --run <run_dir> --upstream <upstream repo> --downstream <downstream repo>`. Exit 0 marks the upstream tickets `snapshot_published`; on failure show the result's `reason` (or `log_path` when set) to the user and ask. Do this only when the whole upstream repo state needed by the edge is merged.
@@ -72,11 +81,11 @@ The report's `Manual step:` section names a step only a person can do. Then:
 
 **NEEDS_CONTEXT**
 
-The implementer is missing information you can supply. Keep the ticket `running`. Answer from what you can read without reading code yourself (state, config, the spec, the ticket, ADRs, a script's JSON); resume the same implementer with SendMessage carrying the answer. Ask the user only if you cannot answer; then handle it as NEEDS_DECISION.
+The implementer is missing information you can supply. Keep the ticket `running`. Answer from what you can read without reading code yourself (state, config, the spec, the ticket, ADRs, a script's JSON); send the answer to the implementer — resume it with `Answer: <the answer>` where the harness can, else the fresh-implementer path above. Ask the user only if you cannot answer; then handle it as NEEDS_DECISION.
 
 **NEEDS_DECISION or BLOCKED**
 
-Set the status (`needs_decision` or `blocked`). Ask the user with AskUserQuestion, quoting the report's `Questions:` (or the block reason and verify log path). Record the answer: `kinetic state add-ruling --run <run_dir> --what "<question>" --why "<answer and reasoning>" --cost "<effect on scope or time>"`. Resume the same implementer with SendMessage carrying the answer; set the ticket back to `running`. The ticket keeps occupying its repo while it waits, so no other ticket in that repo starts.
+Set the status (`needs_decision` or `blocked`). Ask the user — the harness's question tool when the profile names one, chat otherwise — quoting the report's `Questions:` (or the block reason and verify log path). Record the answer: `kinetic state add-ruling --run <run_dir> --what "<question>" --why "<answer and reasoning>" --cost "<effect on scope or time>"`. Then send the ruling to the implementer: resume the same one with `Ruling: <n>` where the harness can, else the fresh-implementer path above; set the ticket back to `running`. The ticket keeps occupying its repo while it waits, so no other ticket in that repo starts.
 
 Then start the next round. Loop until every agent ticket is `merged` or `released`. Human tickets still open then do not hold the loop; they go forward as open items.
 

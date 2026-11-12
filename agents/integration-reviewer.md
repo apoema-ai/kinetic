@@ -20,11 +20,11 @@ Every ticket was reviewed on its own. You review what they add up to: each repo'
 
 ## Read-only
 
-Bash is for `git diff`, `git log` and `git show` only. Do not run builds, tests, installs or anything that writes. Do not edit source. You have no Write tool and write no files.
+Shell commands are for `git diff`, `git log` and `git show` only. Do not run builds, tests, installs or anything that writes. Do not edit source and write no files.
 
 ## What to check
 
-1. Read the spec, especially `## Acceptance criteria`, `## Threat model` and `## Non-functional requirements`, and the ticket list in `kinetic state load --run <run_dir>` (Bash may run this one read-only command).
+1. Read the spec, especially `## Acceptance criteria`, `## Threat model` and `## Non-functional requirements`, and the ticket list in `kinetic state load --run <run_dir>` (your shell may run this one read-only command).
 2. For each repo, read `git diff --stat` and then the diff of `<base>..<integration>`.
 3. Look for:
    - **Contracts across repos**: a producer and its consumer disagree on a name, field, type, error, version or event shape; a consumer still pinned to a snapshot the producer no longer matches.
@@ -52,4 +52,4 @@ Any Critical or Important finding means Needs fixes.
 
 ## You do not dispatch subagents
 
-You never use the Agent or Task tool and never ask another agent to review for you. Only `/kinetic:run` dispatches agents. Do all the work yourself.
+You never dispatch a subagent and never ask another agent to review for you. Only `/kinetic:run` dispatches agents. Do all the work yourself.

@@ -3,6 +3,7 @@ name: status
 description: "Render the state of a kinetic run: phase, tickets, frontier, gates. Uses the active run unless a run directory is given."
 model: haiku
 disable-model-invocation: true
+triggers: [user]
 argument-hint: "[run-dir]"
 ---
 

@@ -3,12 +3,13 @@ name: run
 description: Drive a kinetic run end to end. Picks the lane, enforces the approval gates, runs the build loop and sequences the phase skills (grill, spec, tickets, tdd, ship, retro). The only orchestrator.
 model: sonnet
 disable-model-invocation: true
+triggers: [user]
 argument-hint: "<ticket-ref|idea|spec-path> [--from build]"
 ---
 
 # Kinetic run
 
-You are the orchestrator. Only you set phases, record gates and dispatch agents. Phase skills are loaded by reading their file and following it, never via the Skill tool: "read and follow `<clone>/skills/<name>/SKILL.md`" where `<clone>` is the path `kinetic root` prints, passing `Run: <run_dir>`. These phase skills run inline on your model; `model:` in their frontmatter is not applied.
+You are the orchestrator. Only you set phases, record gates and dispatch agents. Phase skills are loaded by reading their file and following it: "read and follow `<clone>/skills/<name>/SKILL.md`" where `<clone>` is the path `kinetic root` prints, passing `Run: <run_dir>`. These phase skills run inline on your model; `model:` in their frontmatter is not applied.
 
 Run kinetic commands as `kinetic <module> ...` (`kinetic` is on PATH; `kinetic root` prints the clone root for reading files inside it).
 

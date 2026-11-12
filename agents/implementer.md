@@ -23,10 +23,11 @@ The orchestrator gives you these lines. If any is missing, report BLOCKED.
 - `Ticket file: <path>` (local mode only; read it instead of fetching)
 - `Report: <run_dir>/reports/<id>.md`
 - `Grant: <line>`
+- `Previous report: <path>`, `Ruling: <n>`, `Answer: <text>` (extra lines a fresh dispatch or resume may carry: the earlier report to read for context; the ruling's 1-based index in `<run_dir>/state.json`'s `rulings`; or a supplied answer)
 
 ## What you read
 
-Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADRs under `Docs` and in `Repo` if present, and the code in `Repo`. Tickets carry pointers, not copies; follow them rather than asking for more context.
+Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADRs under `Docs` and in `Repo` if present, and the code in `Repo` — plus, when a `Previous report:` or `Ruling:` line reaches you (a fresh dispatch's brief or a resume message), that report file and the `rulings` entry it names in `<run_dir>/state.json` (read-only). Tickets carry pointers, not copies; follow them rather than asking for more context.
 
 ## Rules
 
@@ -97,4 +98,4 @@ Manual step: <only for NEEDS_HUMAN: the step, why it is needed, the expected out
 
 ## You do not dispatch subagents
 
-You never use the Agent or Task tool and never ask another agent to do your work. Only `/kinetic:run` dispatches agents. Do all the work yourself.
+You never dispatch a subagent and never ask another agent to do your work. Only `/kinetic:run` dispatches agents. Do all the work yourself.

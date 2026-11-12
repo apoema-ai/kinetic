@@ -10,7 +10,7 @@ Never assume an agent from a previous session is alive. Re-derive everything fro
 2. Stale tickets: `kinetic state stale-running --run <run_dir>` prints the ids marked `running` that have no report file. For each stale id:
    - Look at its worktree: `git -C <ticket worktree> log --oneline kinetic/<run-id>/integration..HEAD` and `git -C <ticket worktree> status --short`.
    - Tell the user what is there (commits, uncommitted files, nothing) and ask whether to re-dispatch an implementer or to set the ticket back to `todo`. Re-dispatch uses the normal brief from `build-loop.md` (including the `Docs:` line); keep the existing branch and worktree.
-   - A `needs_decision` or `blocked` ticket whose agent is gone: its implementer cannot be resumed with SendMessage. Ask the user the same question again if it is unanswered (check `rulings`), then re-dispatch with the answer in the brief.
+   - A `needs_decision` or `blocked` ticket whose agent is gone: take the fresh-implementer path from `build-loop.md` ("Resume or fresh implementer") — the same path a harness that cannot resume takes. Ask the user the same question again if it is unanswered (check `rulings`), record the ruling, then dispatch a fresh implementer on the same worktree with the normal brief plus `Previous report:` and `Ruling:`.
 3. Tickets with a report file but still `running`: read the report's first lines and handle it as a return (`build-loop.md`, "On each implementer return").
 4. `kinetic next_step --run <run_dir>` prints the suggested next command and why; use it to confirm where to continue.
 
