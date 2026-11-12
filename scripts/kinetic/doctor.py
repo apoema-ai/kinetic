@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from kinetic import config, harness, tracker
+from kinetic import config, harness, install, tracker
 
 SKILLS = ["find-ticket-repos", "checkout-ticket-repos", "resolving-merge-conflicts"]
 PLUGINS = ["superpowers", "dev-fleet"]
@@ -120,20 +120,83 @@ def _stale_files(manifest: dict) -> list[str]:
     return stale
 
 
-def _hooks_checks(clone, hid: str) -> list[dict]:
-    """hooks.json must exist in the recorded clone. On Codex, hook trust is a
-    separate stub check until the Codex installer lands."""
-    install = f"kinetic install --harness {hid}"
+def _devin_hook_commands(cfg) -> set:
+    """Every command string under the "hooks" key of a Devin config.json."""
+    cmds = set()
+    hooks = cfg.get("hooks") if isinstance(cfg, dict) else None
+    if not isinstance(hooks, dict):
+        return cmds
+    for groups in hooks.values():
+        if not isinstance(groups, list):
+            continue
+        for g in groups:
+            ghooks = g.get("hooks") if isinstance(g, dict) else None
+            if not isinstance(ghooks, list):
+                continue
+            for h in ghooks:
+                if isinstance(h, dict) and isinstance(h.get("command"), str):
+                    cmds.add(h["command"])
+    return cmds
+
+
+def _devin_hooks_checks(home: Path, clone, install_cmd: str) -> list[dict]:
+    """Devin hooks live in ~/.config/devin/config.json, written by the
+    installer in Devin's format (--harness devin, Devin tool matchers). The
+    clone's hooks/hooks.json is Claude-format and must not be checked here."""
+    cfg_path = home / ".config" / "devin" / "config.json"
     if not clone:
-        return [_r("hooks-registered", "warn", f"no clone recorded; run: {install}")]
+        return [_r("hooks-registered", "warn",
+                   f"no clone recorded; run: {install_cmd}")]
     cpath = Path(clone)
     if not cpath.is_dir():
         return [_r("hooks-registered", "fail",
-                   f"clone path missing: {clone}; re-run: {install}")]
+                   f"clone path missing: {clone}; re-run: {install_cmd}")]
+    if not cfg_path.is_file():
+        return [_r("hooks-registered", "warn",
+                   f"no Devin hook config at {cfg_path}; run: {install_cmd}")]
+    try:
+        cfg = json.loads(cfg_path.read_text())
+    except (OSError, ValueError):
+        cfg = None
+    if not isinstance(cfg, dict):
+        return [_r("hooks-registered", "fail",
+                   f"{cfg_path} is not a JSON object; fix it or re-run: "
+                   f"{install_cmd}")]
+    have = _devin_hook_commands(cfg)
+    missing = [c for c in install.devin_hook_commands(cpath) if c not in have]
+    out = []
+    if missing:
+        out.append(_r("hooks-registered", "fail",
+                      f"{len(missing)} kinetic hook(s) missing or pointing at "
+                      f"a stale clone in {cfg_path}; re-run: {install_cmd}"))
+    else:
+        out.append(_r("hooks-registered", "pass"))
+    # Devin has no separate hook-trust step like Codex's /hooks; plugin hooks
+    # are best-effort and fail open, so this stays a warning to verify with
+    # /hooks inside a Devin session.
+    out.append(_r("hooks-trusted", "warn",
+                  "Devin plugin hooks are best-effort; confirm they loaded "
+                  "with /hooks in a Devin session"))
+    return out
+
+
+def _hooks_checks(home: Path, clone, hid: str) -> list[dict]:
+    """hooks must be registered for the harness. On Codex, hook trust is a
+    separate stub check until the Codex installer lands."""
+    install_cmd = f"kinetic install --harness {hid}"
+    if hid == "devin":
+        return _devin_hooks_checks(home, clone, install_cmd)
+    if not clone:
+        return [_r("hooks-registered", "warn",
+                   f"no clone recorded; run: {install_cmd}")]
+    cpath = Path(clone)
+    if not cpath.is_dir():
+        return [_r("hooks-registered", "fail",
+                   f"clone path missing: {clone}; re-run: {install_cmd}")]
     hooks_json = cpath / "hooks" / "hooks.json"
     if not hooks_json.is_file():
         return [_r("hooks-registered", "fail",
-                   f"{hooks_json} missing in clone; re-run: {install}")]
+                   f"{hooks_json} missing in clone; re-run: {install_cmd}")]
     out = [_r("hooks-registered", "pass")]
     if hid == "codex":
         # Stub: hooks.json exists in the clone, but Codex hook trust (/hooks)
@@ -179,9 +242,52 @@ def _install_checks(home: Path, hid: str, settings: Path, cfg: dict) -> list[dic
     if not (isinstance(clone, str) and clone) and manifest:
         mc = manifest.get("clone")
         clone = mc if isinstance(mc, str) and mc else None
-    out.extend(_hooks_checks(clone, hid))
+    out.extend(_hooks_checks(home, clone, hid))
     out.append(_tier_check(hid, settings))
     return out
+
+
+def _json_names(node, out):
+    """Collect every "name" string value in a JSON tree."""
+    if isinstance(node, dict):
+        name = node.get("name")
+        if isinstance(name, str):
+            out.add(name)
+        for v in node.values():
+            _json_names(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _json_names(v, out)
+
+
+def _devin_plugin_installed(home: Path, name: str) -> bool:
+    """Whether a plugin named `name` is installed for Devin CLI.
+
+    Checks ~/.local/share/devin/cli/plugins: resolved/required names in
+    lock.json (covers --local linked installs, which leave no cache copy)
+    and plugin manifests under cache/ (fetched installs)."""
+    store = home / ".local" / "share" / "devin" / "cli" / "plugins"
+    lock = store / "lock.json"
+    if lock.is_file():
+        try:
+            data = json.loads(lock.read_text())
+        except (OSError, ValueError):
+            data = None
+        if data is not None:
+            names = set()
+            _json_names(data, names)
+            if name in names:
+                return True
+    cache = store / "cache"
+    if cache.is_dir():
+        for pj in cache.rglob("plugin.json"):
+            try:
+                data = json.loads(pj.read_text())
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict) and data.get("name") == name:
+                return True
+    return False
 
 
 def _skill_checks(home: Path, prof: dict) -> list[dict]:
@@ -192,10 +298,16 @@ def _skill_checks(home: Path, prof: dict) -> list[dict]:
         ok = any((d / s / "SKILL.md").is_file() for d in dirs)
         out.append(_r(f"skill:{s}", "pass") if ok else
                    _r(f"skill:{s}", "warn", f"install skill {s} under {where}"))
-    if prof["plugin_companions"]:
-        # ~/.claude/plugins/cache is the only plugin cache location known
-        # today; harnesses whose profile allows plugin companions are checked
-        # there until per-harness installers land (Devin reads .claude-plugin).
+    store = prof.get("plugin_store")
+    if store == "devin-plugins":
+        for p in PLUGINS:
+            ok = _devin_plugin_installed(home, p)
+            out.append(_r(f"skill:{p}", "pass") if ok else
+                       _r(f"skill:{p}", "warn",
+                          f"install the {p} plugin: devin plugins install <source>"))
+    elif prof["plugin_companions"]:
+        # Claude's plugin cache; other plugin_companions harnesses get their
+        # own store check via prof["plugin_store"] above.
         cache = home / ".claude/plugins/cache"
         for p in PLUGINS:
             ok = any(d.is_dir() for d in cache.glob(f"*/{p}"))

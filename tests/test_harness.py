@@ -19,7 +19,7 @@ class ProfileTest(unittest.TestCase):
             for key in ("name", "hooks", "tools", "resume_subagent",
                         "model_per_dispatch", "question_tool", "skill_dirs",
                         "agent_dirs", "instruction_files", "plugin_companions",
-                        "tier_defaults", "enforced"):
+                        "plugin_store", "tier_defaults", "enforced"):
                 self.assertIn(key, p, f"{hid}.{key}")
             for key in ("pre_tool_use", "post_tool_use", "session_start",
                         "stop", "trust"):

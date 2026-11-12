@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from kinetic import doctor, harness
+from kinetic import doctor, harness, install
 
 SKILLS = ["find-ticket-repos", "checkout-ticket-repos", "resolving-merge-conflicts"]
 PLUGINS = ["superpowers", "dev-fleet"]
@@ -471,6 +471,77 @@ class DoctorTest(unittest.TestCase):
         (self.home / ".claude/skills/find-ticket-repos/SKILL.md").unlink()
         c = self._by_name()
         self.assertIn("~/.claude/skills", c["skill:find-ticket-repos"]["fix"])
+
+    # --- devin harness checks ---
+
+    def _write_devin_config(self, clone):
+        """~/.config/devin/config.json as `kinetic install --harness devin`
+        writes it: every kinetic hook command under the hooks key."""
+        path = self.home / ".config" / "devin" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        hooks = {}
+        for cmd in install.devin_hook_commands(clone):
+            hooks.setdefault("PreToolUse", []).append(
+                {"matcher": "", "hooks": [{"type": "command",
+                                           "command": cmd, "timeout": 10}]})
+        path.write_text(json.dumps({"hooks": hooks}))
+        return path
+
+    def test_devin_hooks_registered_checks_devin_config(self):
+        clone = self._fake_clone("devin-clone")
+        self._write_settings(harness="devin", clone=str(clone))
+        c = self._by_name()
+        # no Devin hook config yet -> warn, not fail
+        self.assertEqual(c["hooks-registered"]["status"], "warn")
+        self.assertIn("kinetic install --harness devin",
+                      c["hooks-registered"]["fix"])
+
+        self._write_devin_config(clone)
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "pass")
+        # Devin plugin hooks are best-effort; trust can't be verified
+        self.assertEqual(c["hooks-trusted"]["status"], "warn")
+
+        # commands pointing at a different clone are stale
+        other = self._fake_clone("other-clone")
+        self._write_devin_config(other)
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "fail")
+        self.assertIn("kinetic install --harness devin",
+                      c["hooks-registered"]["fix"])
+
+    def test_devin_hooks_registered_malformed_config_fails(self):
+        clone = self._fake_clone("devin-clone")
+        self._write_settings(harness="devin", clone=str(clone))
+        path = self.home / ".config" / "devin" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{bad")
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "fail")
+
+    def test_devin_plugin_companions_use_devin_store(self):
+        clone = self._fake_clone("devin-clone")
+        self._write_settings(harness="devin", clone=str(clone))
+        c = self._by_name()
+        self.assertEqual(c["skill:superpowers"]["status"], "warn")
+        self.assertIn("devin plugins install", c["skill:superpowers"]["fix"])
+
+        # a resolved plugin in devin's lock.json counts as installed
+        store = self.home / ".local" / "share" / "devin" / "cli" / "plugins"
+        store.mkdir(parents=True)
+        (store / "lock.json").write_text(json.dumps(
+            {"resolved": [{"name": "superpowers"}]}))
+        c = self._by_name()
+        self.assertEqual(c["skill:superpowers"]["status"], "pass")
+        self.assertEqual(c["skill:dev-fleet"]["status"], "warn")
+
+        # a cached plugin manifest counts too
+        mdir = store / "cache" / "github.com_acme_dev-fleet-abc" / "1.0.0"
+        (mdir / ".claude-plugin").mkdir(parents=True)
+        (mdir / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "dev-fleet"}))
+        c = self._by_name()
+        self.assertEqual(c["skill:dev-fleet"]["status"], "pass")
 
 
 if __name__ == "__main__":
