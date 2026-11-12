@@ -662,6 +662,14 @@ class InstallCodexTest(InstallCase):
         self.assertNotEqual(p.returncode, 0)
         self.assertEqual(mine.read_text(), "mine")
 
+    def test_reinstall_refuses_user_edited_generated_file(self):
+        self.assertEqual(self._install("--harness", "codex").returncode, 0)
+        f = self.agents_dir / "implementer.toml"
+        f.write_text("edited by user")
+        p = self._install("--harness", "codex")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertEqual(f.read_text(), "edited by user")
+
     def test_reinstall_prunes_stale_generated_file(self):
         self.assertEqual(self._install("--harness", "codex").returncode, 0)
         gone = self.clone / "agents" / "fix-reviewer.md"

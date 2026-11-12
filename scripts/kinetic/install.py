@@ -94,17 +94,23 @@ def _link_entry(link: Path, target: Path):
 
 
 def _foreign_files(generated: dict, prev_files: dict) -> list:
-    """Generated targets that already exist, were not written by a previous
-    kinetic install and differ from what we would write (a user's own file)."""
+    """Generated targets that exist and differ from what we would write, and
+    are not an untouched file of a previous kinetic install (a user's own
+    file, or a kinetic file the user has since edited)."""
     out = []
     for path, text in generated.items():
-        if os.path.lexists(path) and str(path) not in prev_files:
-            try:
-                same = path.is_file() and path.read_text() == text
-            except (OSError, UnicodeDecodeError):
-                same = False
-            if not same:
-                out.append(path)
+        if not os.path.lexists(path):
+            continue
+        try:
+            if path.is_file() and path.read_text() == text:
+                continue
+            prev = prev_files.get(str(path))
+            if (prev and prev.get("type") == "file" and path.is_file()
+                    and _hash_file(path) == prev.get("sha256")):
+                continue
+        except (OSError, UnicodeDecodeError):
+            pass
+        out.append(path)
     return out
 
 
@@ -113,7 +119,7 @@ def _check_no_clobber(generated: dict, prev_files: dict) -> int:
     foreign = _foreign_files(generated, prev_files)
     for path in foreign:
         print(f"kinetic install: refusing to overwrite existing {path} "
-              f"(not written by kinetic); move it and re-run", file=sys.stderr)
+              f"(not written by kinetic, or edited since); move it and re-run", file=sys.stderr)
     return 1 if foreign else 0
 
 
