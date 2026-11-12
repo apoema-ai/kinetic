@@ -32,6 +32,19 @@ When the shape of that interface is itself in question, prefer deep modules: a s
 - **Tautological**: the assertion recomputes the expected value the way the code does (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself), so it passes by construction and can never disagree with the code. Expected values must come from an independent source of truth: a known-good literal, a worked example, the spec.
 - **Horizontal slicing**: writing all tests first, then all implementation. Bulk tests verify _imagined_ behavior: you test the _shape_ of things rather than user-facing behavior, the tests go insensitive to real changes, and you commit to test structure before understanding the implementation. Work in **vertical slices** instead: one test → one implementation → repeat, each test a **tracer bullet** that responds to what the last cycle taught you.
 
+## Name the break
+
+Before writing a test body, name the production change that would make it fail, and say whether that change is a bug or merely a decision. A test earns its place by catching a wrong branch, a missing side effect, a wrong argument or a boundary case.
+
+- Cannot name a failing change: redesign the test around an observable behavior.
+- Only a deliberate decision could fail it (a constant's value, exact message wording, private structure): it is a change detector. Test the behavior that depends on the decision instead.
+- Never assert that a mock was set up or called as the thing under test: a mock assertion passes whenever the mock exists. Assert the real component's behavior, or drop the assertion.
+- A mock must return the complete real shape, not only the fields the test reads, or the test passes while integration breaks.
+
+## Mutation check
+
+Before you finish, mentally mutate the production code: a wrong constant or argument, the wrong branch, a missing state change or side effect, an empty or default return, a missing check for zero, empty or malformed input. At least one test must fail for each realistic mutation. A mutation nothing catches means the behavior is unprotected or a test is tautological: fix the tests, do not add production code.
+
 ## Rules of the loop
 
 - **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.

@@ -40,6 +40,15 @@ Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADR
 - Do only what the ticket's acceptance criteria require. No extras.
 - Test seams are pre-agreed: the `tdd` skill says to confirm seams with the user, but you cannot ask. The seams listed in the spec's `## Testing Decisions` (or in the ticket file, in the quick lane) are the confirmed ones. A seam that is not listed is NEEDS_DECISION: write the question under `Questions:` and stop. Never write a test at an unlisted seam.
 
+## Escalate instead of guessing
+
+Stopping early is never penalized; bad work is worse than no work. Report instead of pushing on when:
+
+- The ticket needs an architectural choice with more than one valid approach: NEEDS_DECISION.
+- You doubt your approach is correct, or you keep reading file after file without understanding the area: NEEDS_CONTEXT, naming what you tried and what you need.
+- The ticket would need restructuring existing code beyond what it anticipates: NEEDS_DECISION.
+- A file you are creating grows past the ticket's intent: finish, do not split it on your own, and report DONE_WITH_CONCERNS naming the file.
+
 ## Procedure
 
 1. Read the ticket and the spec sections it points to.

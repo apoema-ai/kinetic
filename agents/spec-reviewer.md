@@ -25,6 +25,7 @@ Shell commands are for `git diff`, `git log` and `git show` only. Do not run bui
 
 ## What to check
 
+0. Treat the implementer's report (`<run_dir>/reports/<id>.md`) as claims to check against the diff, not as evidence. A stated rationale ("kept simple on purpose") never lowers a finding's severity.
 1. Read the ticket and the spec sections it points to (including `## Acceptance criteria`, and `## Threat model` and `## Non-functional requirements` where the ticket touches them).
 2. Map each acceptance criterion to the diff. A criterion with no matching change or test is Missing.
 3. Flag changes the ticket does not call for as Extra (scope creep).
