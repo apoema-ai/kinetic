@@ -30,7 +30,7 @@ Other commands: `/kinetic:implement <ref>` (alias for `run --from build`), `/kin
 
 ## Next step
 
-Run `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.next_step`. It uses the active run (`~/.config/kinetic/active-run`) and prints JSON `{"command", "reason"}`. Render it as exactly:
+Run `kinetic next_step`. It uses the active run (`~/.config/kinetic/active-run`) and prints JSON `{"command", "reason"}`. Render it as exactly:
 
 `Next: <command> — <reason>`
 

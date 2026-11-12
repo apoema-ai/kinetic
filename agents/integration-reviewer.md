@@ -23,7 +23,7 @@ Bash is for `git diff`, `git log` and `git show` only. Do not run builds, tests,
 
 ## What to check
 
-1. Read the spec, especially `## Acceptance criteria`, `## Threat model` and `## Non-functional requirements`, and the ticket list in `python3 -m kinetic.state load --run <run_dir>` (Bash may run this one read-only command).
+1. Read the spec, especially `## Acceptance criteria`, `## Threat model` and `## Non-functional requirements`, and the ticket list in `kinetic state load --run <run_dir>` (Bash may run this one read-only command).
 2. For each repo, read `git diff --stat` and then the diff of `<base>..<integration>`.
 3. Look for:
    - **Contracts across repos**: a producer and its consumer disagree on a name, field, type, error, version or event shape; a consumer still pinned to a snapshot the producer no longer matches.

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shlex
 
 import _common
@@ -38,11 +37,10 @@ def main(inp):
         bad.append(("(outside registered repos)", None, None))
     if not bad:
         return
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     lines = []
     for name, path, tid in bad:
         if path:
-            lines.append(f"{name}: PYTHONPATH={shlex.quote(root + '/scripts')} python3 -m kinetic.verify "
+            lines.append(f"{name}: kinetic verify "
                          f"--run {shlex.quote(str(run_dir))} --repo-name {shlex.quote(name)} "
                          f"--repo-path {shlex.quote(path)}"
                          + (f" --ticket {shlex.quote(tid)}" if tid else ""))

@@ -12,7 +12,7 @@ Alias for `/kinetic:run <ref> --from build`, with a pre-check. Do not reimplemen
 
 ## Validate the ref
 
-Load it: a tracker reference through the adapter's "fetch" operation (resolve the tracker with `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.tracker resolve` and read the adapter file it names), otherwise read the ticket or spec file. It needs both:
+Load it: a tracker reference through the adapter's "fetch" operation (resolve the tracker with `kinetic tracker resolve` and read the adapter file it names), otherwise read the ticket or spec file. It needs both:
 
 - **Acceptance criteria**: a `- [ ]` checklist or an "Acceptance criteria" section.
 - **A repo**: a `Repo:` line, a repo field, or exactly one repo registered in `~/.config/kinetic/repos.json`.

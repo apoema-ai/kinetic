@@ -111,7 +111,7 @@ class StopGate(HookCase):
         out = self.hook("completion_gate", {"stop_hook_active": False})
         self.assertEqual(out["decision"], "block")
         self.assertIn("api", out["reason"])
-        self.assertIn("kinetic.verify", out["reason"])
+        self.assertIn("kinetic verify", out["reason"])
 
     def test_stop_allows_after_passing_verify(self):
         self.activate()

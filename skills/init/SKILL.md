@@ -10,14 +10,14 @@ argument-hint: "[repo-path ...]"
 
 Set up kinetic. Ask one question at a time, multiple choice where possible. Write only under `~/.config/kinetic/`; never write anything inside a repo.
 
-Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
+Run scripts as `kinetic <module> ...`.
 
 Run this outside the session that owns the active run: in that session the isolation hook denies the config writes below. Any other session works, or finish or abandon the run first.
 
 ## Steps
 
 1. **Repos.** Use the paths in the arguments; if none, ask which repo paths to register. The default name of each repo is its directory basename; the user may override it.
-2. **Detect.** Run `python3 -m kinetic.detect_repos PATH [PATH ...]`. It prints JSON `{path: {"verify": ..., "marker": ...}}`.
+2. **Detect.** Run `kinetic detect_repos PATH [PATH ...]`. It prints JSON `{path: {"verify": ..., "marker": ...}}`.
 3. **Confirm verify.** Ask only about repos whose `verify` is null (ask for the command) or looks unusual (confirm it). Accept the rest silently.
 3b. **Snapshots.** For each repo ask, one at a time and only if it publishes snapshot builds other repos consume: the `publish_snapshot` command (builds and publishes a snapshot) and the `pin` command (run in the downstream repo; it reads `KINETIC_UPSTREAM_REF`). Leave both unset otherwise: the tickets phase then uses `merge` edges between repos instead of `snapshot` edges.
 4. **Tracker.** Four questions, one at a time:
@@ -30,8 +30,8 @@ Run this outside the session that owns the active run: in that session the isola
    - `~/.config/kinetic/repos.json`: one entry per repo keyed by name, `{"path": "<abs path>", "verify": "<command>"}`, plus `"publish_snapshot"` and `"pin"` when given. Keep existing entries for repos not mentioned now.
    - `~/.config/kinetic/settings.json`: `{"tracker", "tracker_settings", "workspace_root"}`, plus `tracker_description` for `other`, `tracker_names` only when overridden and `pr_template` only when a path was given. Old top-level keys already there (the 0.2.0 tracker keys) are kept; they are still read.
    - If either file already exists, show the diff it would make and ask before overwriting.
-6b. **Labels.** Resolve the tracker with `python3 -m kinetic.tracker resolve`, and with the adapter's "fetch" operation check that each concrete label in `names` (`names.kind.*` and `names.edge.*`) exists; never check templated labels such as `ships-with:<group>` or `after:<key>`. Skip this step for the local tracker, as doctor does. List the missing ones and ask before creating any: creating a label is a tracker write. Create only on a yes; on a no, leave them (doctor warns).
-7. **Doctor.** Run `python3 -m kinetic.doctor --repo NAME=PATH` once per registered repo (all in one call), show the checks as a table, and give the one-line fix for each warn or fail.
+6b. **Labels.** Resolve the tracker with `kinetic tracker resolve`, and with the adapter's "fetch" operation check that each concrete label in `names` (`names.kind.*` and `names.edge.*`) exists; never check templated labels such as `ships-with:<group>` or `after:<key>`. Skip this step for the local tracker, as doctor does. List the missing ones and ask before creating any: creating a label is a tracker write. Create only on a yes; on a no, leave them (doctor warns).
+7. **Doctor.** Run `kinetic doctor --repo NAME=PATH` once per registered repo (all in one call), show the checks as a table, and give the one-line fix for each warn or fail.
 
 ## Rules
 
