@@ -479,6 +479,10 @@ The run-scoped hooks (isolation, record_edit, completion_gate) act only in the s
 - **The run is stalled.** The frontier is empty with tickets still `todo`. kinetic shows the waiting edges; usually a `snapshot` edge between repos without `publish_snapshot`/`pin`, or a `release` edge nobody has marked. Mark a release with `kinetic state set-ticket --run <run_dir> --id <upstream-id> --field status=released`.
 - **Doctor checks:** `git` and `gh` on PATH, `gh auth status`, a readable `repos.json`, a resolvable verify command per repo, the optional companion skills and plugins, and a reminder to check the Atlassian MCP with `/mcp`.
 
+**Upgrading an existing Claude Code install:** skills, agents and hooks now call `kinetic ...` instead of `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/scripts python3 -m kinetic.*`. After updating, run `<clone>/bin/kinetic install --harness claude` once; until then `doctor` warns and skills fall back to `python3 <plugin-root>/bin/kinetic`.
+
+**Stale-verify guard:** on every harness (Claude included), `set-phase ship` and an approved ship gate are refused while a repo's verify is stale — this is intentional.
+
 Run kinetic commands as `kinetic <module> ...` once installed (`kinetic root` prints the clone root). From a checkout without installing, `PYTHONPATH=<kinetic>/scripts python3 -m kinetic.<module> ...` still works.
 
 ## Code layout

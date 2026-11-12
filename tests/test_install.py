@@ -654,6 +654,22 @@ class InstallCodexTest(InstallCase):
         self.assertIn("echo foreign", cmds)
 
 
+    def test_refuses_foreign_agent_file(self):
+        self.agents_dir.mkdir(parents=True)
+        mine = self.agents_dir / "implementer.toml"
+        mine.write_text("mine")
+        p = self._install("--harness", "codex")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertEqual(mine.read_text(), "mine")
+
+    def test_reinstall_prunes_stale_generated_file(self):
+        self.assertEqual(self._install("--harness", "codex").returncode, 0)
+        gone = self.clone / "agents" / "fix-reviewer.md"
+        gone.unlink()
+        self.assertEqual(self._install("--harness", "codex").returncode, 0)
+        self.assertFalse((self.agents_dir / "fix-reviewer.toml").exists())
+
+
 class InstallOpenCodeTest(InstallCase):
     """`kinetic install --harness opencode` is file generation only: flat
     kntc-<name>.md skill stubs under ~/.config/opencode/skills, markdown
@@ -905,6 +921,27 @@ class UninstallTest(InstallCase):
         p = self._uninstall()
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertTrue(os.path.islink(self.link))
+
+
+class HookCommandPathsTest(unittest.TestCase):
+    """Every generated hook command must point at a script that exists."""
+
+    def test_generated_hook_scripts_exist(self):
+        from kinetic import install
+        import shlex
+        for cmds in (install.codex_hook_commands(ROOT),
+                     install.devin_hook_commands(ROOT)):
+            self.assertTrue(cmds)
+            for c in cmds:
+                script = shlex.split(c)[1]
+                self.assertTrue(Path(script).is_file(), script)
+
+    def test_clone_path_with_metacharacters_is_quoted(self):
+        from kinetic import install
+        import shlex
+        for c in install.codex_hook_commands(Path('/x/a "b" $HOME`')):
+            self.assertEqual(shlex.split(c)[1].split("/hooks/")[0],
+                             '/x/a "b" $HOME`')
 
 
 if __name__ == "__main__":

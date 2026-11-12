@@ -43,11 +43,23 @@ def merge_ticket(repo_path, ticket_branch: str, integration_branch: str) -> dict
 
 
 def status_hash(repo) -> str:
-    """Stable sha256 of `git status --porcelain` for the repo."""
-    r = _git(repo, "status", "--porcelain")
-    if r.returncode != 0:
-        raise RuntimeError(r.stderr.strip() or f"cannot read git status in {repo}")
-    return hashlib.sha256(r.stdout.encode("utf-8")).hexdigest()
+    """Stable sha256 of the repo's working state: `git status --porcelain`,
+    `git diff HEAD` and the bytes of untracked files, so a content edit to an
+    already-dirty or untracked file changes it too."""
+    h = hashlib.sha256()
+    for args in (("status", "--porcelain"), ("diff", "HEAD")):
+        r = _git(repo, *args)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.strip() or f"cannot read git {args[0]} in {repo}")
+        h.update(r.stdout.encode("utf-8"))
+    r = _git(repo, "ls-files", "--others", "--exclude-standard")
+    for name in sorted(r.stdout.splitlines()):
+        h.update(name.encode("utf-8"))
+        try:
+            h.update((Path(repo) / name).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()
 
 
 def assert_unchanged(repo, head: str, want_status_hash: str) -> dict:

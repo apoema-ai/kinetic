@@ -102,13 +102,14 @@ Say which of the two optional ones ran and which were unavailable. Apply confirm
 
 A reviewer must never change the worktree it reviews, on any harness. Where the harness can restrict the reviewer's tools, keep that allow-list; this check is the backstop everywhere.
 
-Before dispatching a reviewer, for each worktree named in its brief (`Repo:` lines), record two values:
+Before dispatching a reviewer, for each worktree named in its brief (`Repo:` lines), record:
 
 - head: `git -C <worktree> rev-parse HEAD`
+- clean tree: `git -C <worktree> status --porcelain` must print nothing; if it does not, commit the work or stop and ask the user — never run the restore below over uncommitted work you did not record
 - status hash: `kinetic gitops status-hash --repo <worktree>` — keep the `status_hash` value from its JSON output
 
 After the reviewer returns and before you read or save its reply, run:
 
 `kinetic gitops assert-unchanged --repo <worktree> --head <sha> --status-hash <h>`
 
-Exit 0 means the worktree is untouched and the review counts. Non-zero means the reviewer changed it: restore the worktree to the recorded state — `git -C <worktree> reset --hard <sha>` then `git -C <worktree> clean -fd` (the worktree is scratch space, so this only discards what the reviewer left uncommitted) — discard the review (do not save its reply to the output file) and dispatch the reviewer again once with the same brief and the same recorded values. If the check fails a second time, stop and ask the user. Never act on a review whose check failed.
+Exit 0 means the worktree is untouched and the review counts. Non-zero means the reviewer changed it: restore the worktree to the recorded state — `git -C <worktree> reset --hard <sha>` then `git -C <worktree> clean -fd` (safe only because you recorded a clean tree before the review, so this discards only what the reviewer left) — discard the review (do not save its reply to the output file) and dispatch the reviewer again once with the same brief and the same recorded values. If the check fails a second time, stop and ask the user. Never act on a review whose check failed.

@@ -592,6 +592,10 @@ def checks(repos: list[tuple[str, str]], home: Path | None = None,
     for tool in ("git", "gh"):
         found = shutil.which(tool)
         out.append(_r(tool, "pass") if found else _r(tool, "fail", f"install {tool} and put it on PATH"))
+    out.append(_r("kinetic-launcher", "pass") if shutil.which("kinetic") else
+               _r("kinetic-launcher", "warn",
+                  "`kinetic` is not on PATH: run `<clone>/bin/kinetic install --harness <h>`"
+                  " (until then call `python3 <clone>/bin/kinetic ...`)"))
     if shutil.which("gh"):
         try:
             code = subprocess.run(["gh", "auth", "status", "--hostname", "github.com"],

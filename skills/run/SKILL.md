@@ -11,7 +11,7 @@ argument-hint: "<ticket-ref|idea|spec-path> [--from build]"
 
 You are the orchestrator. Only you set phases, record gates and dispatch agents. Phase skills are loaded by reading their file and following it: "read and follow `<clone>/skills/<name>/SKILL.md`" where `<clone>` is the path `kinetic root` prints, passing `Run: <run_dir>`. These phase skills run inline on your model; `model:` in their frontmatter is not applied.
 
-Run kinetic commands as `kinetic <module> ...` (`kinetic` is on PATH; `kinetic root` prints the clone root for reading files inside it).
+Run kinetic commands as `kinetic <module> ...` (`kinetic` is on PATH; `kinetic root` prints the clone root for reading files inside it). If `kinetic` is not found — a plugin update without `kinetic install` — use `python3 <plugin-root>/bin/kinetic` in its place (`<plugin-root>` is the directory that holds this skill's `skills/` folder), pass the same fallback to agents in their briefs, and tell the user to run `<plugin-root>/bin/kinetic install --harness claude`.
 
 Clone root: run `kinetic root` once to get the clone's absolute path. Skill, guide, agent and tracker-adapter files are named relative to it (`skills/<name>/SKILL.md`, `skills/run/guides/`, `trackers/<name>.md`, `templates/`); substitute that path as you read them. Agents run the same `kinetic <module>` commands — `kinetic` is on their PATH too. Never edit `state.json` by hand and never read code or full diffs yourself: scripts emit JSON, agents write reports, you read report headers.
 

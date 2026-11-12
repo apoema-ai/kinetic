@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import re
 import shutil
 import subprocess
@@ -92,11 +93,39 @@ def _link_entry(link: Path, target: Path):
             "sha256": _sha256_bytes(str(target).encode())}
 
 
-def _write_generated_files(generated: dict) -> None:
-    """Write every {path: text} generated file, creating parent dirs."""
+def _foreign_files(generated: dict, prev_files: dict) -> list:
+    """Generated targets that already exist, were not written by a previous
+    kinetic install and differ from what we would write (a user's own file)."""
+    out = []
+    for path, text in generated.items():
+        if (os.path.lexists(path) and str(path) not in prev_files
+                and (path.is_dir() or path.read_text() != text)):
+            out.append(path)
+    return out
+
+
+def _check_no_clobber(generated: dict, prev_files: dict) -> int:
+    """0 when safe to write, else 1 after printing the files in the way."""
+    foreign = _foreign_files(generated, prev_files)
+    for path in foreign:
+        print(f"kinetic install: refusing to overwrite existing {path} "
+              f"(not written by kinetic); move it and re-run", file=sys.stderr)
+    return 1 if foreign else 0
+
+
+def _write_generated_files(generated: dict, prev_files: dict | None = None) -> None:
+    """Write every {path: text} generated file, creating parent dirs, then
+    prune files a previous install wrote that this one no longer generates
+    (only when their content still matches what kinetic wrote)."""
     for path, text in generated.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, text)
+    for old, entry in (prev_files or {}).items():
+        op = Path(old)
+        if (entry.get("type") == "file" and op not in generated
+                and op.is_file() and not op.is_symlink()
+                and _hash_file(op) == entry.get("sha256")):
+            op.unlink()
 
 
 def _generated_files(link: Path, launcher: Path, generated: dict) -> dict:
@@ -291,7 +320,7 @@ def _hook_groups(clone: Path, harness_id: str, spec: list) -> dict:
         groups.setdefault(event, []).append({
             "matcher": matcher,
             "hooks": [{"type": "command",
-                       "command": f'python3 "{clone}/hooks/{script}.py"'
+                       "command": f"python3 {shlex.quote(str(clone / 'hooks' / script))}"
                                   f" --harness {harness_id}",
                        "timeout": 10}]})
     return groups
@@ -765,6 +794,8 @@ def _install_codex(clone: Path, home: Path) -> int:
     if prev_hcfg.get("path") == str(hooks_path):
         hooks_existed = bool(prev_hcfg.get("existed", hooks_existed))
 
+    if _check_no_clobber(generated, prev_files) != 0:
+        return 1
     if _ensure_link(link, launcher, prev_files) != 0:
         return 1
     res = _write_install_settings(home, clone, "codex", prev)
@@ -772,7 +803,7 @@ def _install_codex(clone: Path, home: Path) -> int:
         return 1
     sp, existed, previous = res
 
-    _write_generated_files(generated)
+    _write_generated_files(generated, prev_files)
     hooks_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(hooks_path,
                  json.dumps(merged_hooks, indent=2, sort_keys=True) + "\n")
@@ -1014,6 +1045,8 @@ def _install_opencode(clone: Path, home: Path) -> int:
     n_agents = sum(1 for p in generated
                    if p.parent == _opencode_agents_dir(home))
 
+    if _check_no_clobber(generated, prev_files) != 0:
+        return 1
     if _ensure_link(link, launcher, prev_files) != 0:
         return 1
     res = _write_install_settings(home, clone, "opencode", prev)
@@ -1021,7 +1054,7 @@ def _install_opencode(clone: Path, home: Path) -> int:
         return 1
     sp, existed, previous = res
 
-    _write_generated_files(generated)
+    _write_generated_files(generated, prev_files)
 
     manifest = {
         "version": MANIFEST_VERSION,

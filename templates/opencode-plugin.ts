@@ -63,7 +63,16 @@ function scriptsFor(tool: unknown, phase: "pre" | "post"): string[] {
 // as JSON stdin; resolves the parsed stdout object or null on any failure
 // (spawn error, timeout, non-JSON output). Hooks themselves fail closed where
 // it matters; a transport failure stays fail-open like other harnesses.
-function callHook(script: string, payload: unknown): Promise<any | null> {
+// failClosed (pre-tool hooks): a spawn error, crash, timeout or unparsable
+// output becomes an "ask" instead of silently allowing the call.
+function callHook(
+  script: string,
+  payload: unknown,
+  failClosed = false,
+): Promise<any | null> {
+  const failed = failClosed
+    ? { decision: "ask", reason: `kinetic hook ${script} failed to run; confirm before continuing` }
+    : null
   return new Promise((resolve) => {
     let child: any
     try {
@@ -71,19 +80,19 @@ function callHook(script: string, payload: unknown): Promise<any | null> {
         "python3",
         [HOOK_DIR + "/" + script, "--harness", "opencode"],
         { timeout: TIMEOUT_MS, maxBuffer: MAX_STDOUT },
-        (_err: any, stdout: any) => {
+        (err: any, stdout: any) => {
           try {
             const text = String(stdout || "").trim()
-            if (!text) return resolve(null)
+            if (!text) return resolve(err ? failed : null)
             const parsed = JSON.parse(text)
-            resolve(parsed && typeof parsed === "object" ? parsed : null)
+            resolve(parsed && typeof parsed === "object" ? parsed : failed)
           } catch {
-            resolve(null)
+            resolve(failed)
           }
         },
       )
     } catch {
-      return resolve(null)
+      return resolve(failed)
     }
     try {
       child.stdin.write(JSON.stringify(payload ?? {}))
@@ -180,7 +189,7 @@ async function runPreHooks(ctx: any, e: any, cwd: string) {
   }
   let ask: string | null = null
   for (const script of scripts) {
-    const out = await callHook(script, payload)
+    const out = await callHook(script, payload, true)
     const decision = out && out.decision
     if (decision === "deny") {
       throw new Error(

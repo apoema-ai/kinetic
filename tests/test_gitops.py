@@ -180,6 +180,13 @@ class AssertUnchangedTests(unittest.TestCase):
                               "--head", self.head, "--status-hash", self.hash])
         return rc, json.loads(buf.getvalue())
 
+    def test_content_edit_to_untracked_file_detected(self):
+        f = self.repo / "new.txt"
+        f.write_text("a")
+        h = gitops.status_hash(self.repo)
+        f.write_text("b")
+        self.assertNotEqual(gitops.status_hash(self.repo), h)
+
     def test_clean_worktree_passes(self):
         rc, out = self._assert()
         self.assertEqual(rc, 0)
