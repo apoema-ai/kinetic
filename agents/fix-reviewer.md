@@ -2,6 +2,7 @@
 name: fix-reviewer
 description: Read-only scoped re-review of one kinetic fix round. Verdicts each earlier review finding and checks only the fix diff for new breakage. Dispatched only by /kinetic:run.
 model: sonnet
+tier: standard
 tools: Read, Grep, Glob, Bash
 ---
 
