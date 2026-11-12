@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -266,32 +267,10 @@ def devin_hook_commands(clone: Path) -> list:
             for g in groups for h in g["hooks"]]
 
 
-def _is_kinetic_devin_hook(hook) -> bool:
-    return (isinstance(hook, dict)
-            and "--harness devin" in str(hook.get("command") or ""))
-
-
 def _strip_kinetic_devin_hooks(hooks: dict) -> dict:
     """hooks minus every kinetic (`--harness devin`) hook entry; groups left
     empty are dropped. Malformed event values and groups are preserved."""
-    out = {}
-    for event, groups in hooks.items():
-        if not isinstance(groups, list):
-            out[event] = groups
-            continue
-        kept_groups = []
-        for g in groups:
-            ghooks = g.get("hooks") if isinstance(g, dict) else None
-            if not isinstance(ghooks, list):
-                kept_groups.append(g)
-                continue
-            kept = [h for h in ghooks if not _is_kinetic_devin_hook(h)]
-            if kept:
-                kept_groups.append({**g, "hooks": kept})
-        if kept_groups:
-            out[event] = kept_groups
-        # an event left with no groups is dropped (equivalent to [])
-    return out
+    return _strip_marked_hooks(hooks, "--harness devin")
 
 
 def _merge_devin_config(cfg: dict, clone: Path) -> dict:
@@ -303,15 +282,8 @@ def _merge_devin_config(cfg: dict, clone: Path) -> dict:
         hooks = {}
     if not isinstance(hooks, dict):
         raise ValueError('"hooks" in the Devin config must be a JSON object')
-    merged = _strip_kinetic_devin_hooks(hooks)
-    for event, new_groups in _devin_hook_groups(clone).items():
-        existing = merged.get(event)
-        if existing is None:
-            merged[event] = list(new_groups)
-        elif isinstance(existing, list):
-            existing.extend(new_groups)
-        # a non-list foreign value is preserved and ours skipped for that event
-    cfg["hooks"] = merged
+    cfg["hooks"] = _merge_hook_groups(hooks, _devin_hook_groups(clone),
+                                      "--harness devin")
     return cfg
 
 
@@ -432,6 +404,586 @@ def _install_devin(clone: Path, home: Path) -> int:
           "then re-run `kinetic install --harness devin` after `git pull` "
           "to pick up updates (a --local plugin tracks the clone).")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Codex CLI
+#
+# `kinetic install --harness codex` is file generation only; it never shells
+# out to codex (the CLI is only required on PATH). Codex discovers skills
+# under ~/.agents/skills, sub-agent definitions under ~/.codex/agents/*.toml
+# and hooks in ~/.codex/hooks.json — the same
+# {event: [{matcher, hooks: [{type, command, ...}]}]} shape Claude uses, so
+# foreign entries merge exactly like Devin's. Each skill becomes a
+# kntc-<name> stub whose body points at the clone's skills/<name>/SKILL.md;
+# skills whose source frontmatter sets disable-model-invocation: true (the
+# user-only set plus doctor) also get an agents/openai.yaml sidecar with
+# policy.allow_implicit_invocation: false. Each agents/*.md becomes a TOML
+# file with the tier resolved through harness.resolve_tier. Hook entries are
+# marked by `--harness codex` so re-installs replace them and --uninstall
+# removes exactly them. Codex additionally gates hooks behind interactive
+# trust (/hooks writes trusted_hash state into ~/.codex/config.toml
+# [hooks.state]); doctor verifies that state, this installer only prints the
+# instruction.
+
+
+def _codex_dir(home: Path) -> Path:
+    # CODEX_HOME is not honoured: every kinetic path is derived from Path.home()
+    # so install, doctor and the hooks agree on one location.
+    return home / ".codex"
+
+
+def _codex_hooks_path(home: Path) -> Path:
+    return _codex_dir(home) / "hooks.json"
+
+
+def _codex_agents_dir(home: Path) -> Path:
+    return _codex_dir(home) / "agents"
+
+
+def _agents_skills_dir(home: Path) -> Path:
+    return home / ".agents" / "skills"
+
+
+def _fm_scalar(raw: str):
+    """One frontmatter value: inline list, bool, quoted or plain scalar."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        return [_fm_scalar(v) for v in inner.split(",")] if inner else []
+    low = raw.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        return raw[1:-1]
+    return raw
+
+
+def _split_frontmatter(path: Path):
+    """(fields, body) for a markdown file with a --- fenced frontmatter block.
+    Only single-line `key: value` pairs are read — all kinetic sources use
+    that shape."""
+    lines = path.read_text().splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise ValueError(f"{path}: missing frontmatter")
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        raise ValueError(f"{path}: unterminated frontmatter")
+    fields = {}
+    for line in lines[1:end]:
+        key, sep, raw = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        if key:
+            fields[key] = _fm_scalar(raw)
+    return fields, "".join(lines[end + 1:]).lstrip("\n")
+
+
+def _toml_basic(text: str) -> str:
+    """A TOML basic-string literal; JSON string syntax is a valid subset."""
+    return json.dumps(str(text), ensure_ascii=False)
+
+
+def _toml_instructions(body: str) -> str:
+    """developer_instructions value: a literal ''' block when safe, else a
+    basic string (a body containing ''' or ending in ' cannot use one)."""
+    text = body.strip("\n")
+    if not text:
+        return '""'
+    if "'''" in text or text.endswith("'") or "\r" in text:
+        return _toml_basic(text)
+    return "'''\n" + text + "\n'''"
+
+
+def _codex_skill_files(clone: Path, skills_root: Path) -> dict:
+    """{path: text} for every kntc-<name> stub skill, plus agents/openai.yaml
+    sidecars for user-only skills (disable-model-invocation: true)."""
+    skills_src = clone / "skills"
+    if not skills_src.is_dir():
+        raise ValueError(f"{skills_src} is missing; cannot generate skills")
+    out = {}
+    for skill_md in sorted(skills_src.glob("*/SKILL.md")):
+        fields, _body = _split_frontmatter(skill_md)
+        # the directory name is what Codex discovers; frontmatter name must
+        # agree or the stub would point at the wrong source path
+        name = skill_md.parent.name
+        fm_name = fields.get("name")
+        if fm_name is not None and fm_name != name:
+            raise ValueError(
+                f"{skill_md}: frontmatter name {fm_name!r} != directory "
+                f"{name!r}")
+        desc = fields.get("description")
+        if not isinstance(desc, str) or not desc:
+            raise ValueError(
+                f"{skill_md}: frontmatter needs a description")
+        stub_dir = skills_root / f"kntc-{name}"
+        out[stub_dir / "SKILL.md"] = (
+            "---\n"
+            f"name: kntc-{name}\n"
+            f"description: {json.dumps('kinetic: ' + desc, ensure_ascii=False)}\n"
+            "---\n\n"
+            f"Read and follow `{clone}/skills/{name}/SKILL.md`.\n")
+        if fields.get("disable-model-invocation") is True:
+            out[stub_dir / "agents" / "openai.yaml"] = (
+                "policy:\n  allow_implicit_invocation: false\n")
+    if not out:
+        raise ValueError(f"{skills_src}: no skills found")
+    return out
+
+
+def _codex_agent_files(clone: Path, agents_root: Path,
+                       settings_path: Path) -> dict:
+    """{path: text} of ~/.codex/agents/<name>.toml generated from agents/*.md.
+    tier resolves through harness.resolve_tier so settings.json tiers apply;
+    the Claude-only frontmatter keys model/tools have no Codex agent
+    equivalent (tools are not restricted per-agent on Codex)."""
+    agents_src = clone / "agents"
+    if not agents_src.is_dir():
+        raise ValueError(f"{agents_src} is missing; cannot generate agents")
+    out = {}
+    for md in sorted(agents_src.glob("*.md")):
+        fields, body = _split_frontmatter(md)
+        name = md.stem
+        fm_name = fields.get("name")
+        if fm_name is not None and fm_name != name:
+            raise ValueError(
+                f"{md}: frontmatter name {fm_name!r} != file {name!r}")
+        desc = fields.get("description")
+        tier = fields.get("tier")
+        if not isinstance(desc, str) or not desc \
+                or not isinstance(tier, str) or not tier:
+            raise ValueError(
+                f"{md}: frontmatter needs description and tier")
+        try:
+            resolved = harness.resolve_tier("codex", tier,
+                                            settings=settings_path)
+        except harness.HarnessError as e:
+            raise ValueError(f"{md}: {e}")
+        lines = [
+            f"name = {_toml_basic(name)}",
+            f"description = {_toml_basic(desc)}",
+            f"developer_instructions = {_toml_instructions(body)}",
+        ]
+        if resolved.get("model"):
+            lines.append(f"model = {_toml_basic(resolved['model'])}")
+        if resolved.get("effort"):
+            lines.append(
+                f"model_reasoning_effort = {_toml_basic(resolved['effort'])}")
+        skills = fields.get("skills") or []
+        if isinstance(skills, str):
+            skills = [skills]
+        for skill in skills:
+            lines += ["", "[[skills.config]]",
+                      f"name = {_toml_basic('kntc-' + str(skill))}",
+                      "enabled = true"]
+        out[agents_root / f"{name}.toml"] = "\n".join(lines) + "\n"
+    if not out:
+        raise ValueError(f"{agents_src}: no agents found")
+    return out
+
+
+def _codex_hook_spec() -> list:
+    """(event, matcher, script) triples mirroring hooks/hooks.json with Codex
+    tool names. apply_patch is Codex's only file-edit tool; its matcher also
+    answers to the Write/Edit aliases Codex registers for it."""
+    tools = harness.profile("codex")["tools"]
+    edit = "apply_patch|Write|Edit"
+    shell = tools["shell"]  # "Bash"
+    write_ops = (f"^{shell}$"
+                 "|mcp__.*atlassian.*(create|edit|Edit|update|transition|"
+                 "[Cc]omment|executeWrite|executeDestructive).*"
+                 "|mcp__.*github.*(create_pull_request|merge_pull_request|"
+                 "update_pull_request|push_files|create_or_update_file|"
+                 "create_branch|delete_file).*")
+    return [
+        ("PostToolUse", edit, "record_edit.py"),
+        ("PostToolUse", f"^{shell}$", "claim_run.py"),
+        ("Stop", "", "completion_gate.py"),
+        ("PreToolUse", edit, "isolation.py"),
+        ("PreToolUse", write_ops, "confirm_write_ops.py"),
+        ("PreToolUse", "mcp__.*deploy.*|mcp__.*tekton.*trigger.*",
+         "confirm_deploy.py"),
+        ("SessionStart", "", "orient.py"),
+    ]
+
+
+def codex_hook_groups(clone: Path) -> dict:
+    """{event: [matcher group, ...]} in Codex's hooks.json format."""
+    groups = {}
+    for event, matcher, script in _codex_hook_spec():
+        groups.setdefault(event, []).append({
+            "matcher": matcher,
+            "hooks": [{"type": "command",
+                       "command": f'python3 "{clone}/hooks/{script}.py"'
+                                  " --harness codex",
+                       "timeout": 10}]})
+    return groups
+
+
+def codex_hook_commands(clone: Path) -> list:
+    """The hook command strings the Codex installer writes into hooks.json;
+    doctor compares these against what is actually registered."""
+    return [h["command"]
+            for groups in codex_hook_groups(clone).values()
+            for g in groups for h in g["hooks"]]
+
+
+def _is_kinetic_codex_hook(hook) -> bool:
+    return (isinstance(hook, dict)
+            and "--harness codex" in str(hook.get("command") or ""))
+
+
+def _codex_event_key(event: str) -> str:
+    """PreToolUse -> pre_tool_use (Codex's hooks.state key label)."""
+    s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", event)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
+
+
+# Events whose matcher Codex ignores when hashing and matching
+# (matcher_pattern_for_event in codex-rs/hooks).
+_CODEX_NO_MATCHER_EVENTS = {"UserPromptSubmit", "Stop", "Interrupt",
+                            "PreModelRequest", "PostModelRequest"}
+# Events that may emit additionalContext; others ignore the limit.
+_CODEX_ACL_EVENTS = {"PreToolUse", "PostToolUse", "SessionStart",
+                     "UserPromptSubmit", "SubagentStart"}
+_CODEX_DEFAULT_ACL = 2500
+
+
+def _codex_timeout(event: str, raw) -> int:
+    """normalize_command_hook: SessionEnd/Interrupt default 1s capped 3s;
+    everything else defaults 600s, floor 1s."""
+    try:
+        t = int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        t = None
+    if event in ("SessionEnd", "Interrupt"):
+        return min(max(t if t is not None else 1, 1), 3)
+    return max(t if t is not None else 600, 1)
+
+
+def _codex_norm_handler(event: str, handler) -> dict | None:
+    """The HookHandlerConfig::Command fields that enter Codex's trust hash,
+    camelCased as serde emits them; None for non-command handlers."""
+    if not isinstance(handler, dict) or handler.get("type") != "command":
+        return None
+    command = handler.get("command")
+    if not isinstance(command, str):
+        return None
+    out = {"type": "command", "command": command,
+           "timeout": _codex_timeout(event, handler.get("timeout")),
+           "async": bool(handler.get("async", False))}
+    sm = handler.get("statusMessage")
+    if isinstance(sm, str):
+        out["statusMessage"] = sm
+    acl = handler.get("additionalContextLimit")
+    if isinstance(acl, int) and not isinstance(acl, bool) \
+            and event in _CODEX_ACL_EVENTS and acl != _CODEX_DEFAULT_ACL:
+        out["additionalContextLimit"] = acl
+    return out
+
+
+def _codex_hook_hash(event: str, matcher, handler_norm: dict) -> str:
+    """Codex's trusted_hash: sha256 of the sorted-key compact JSON of the
+    normalized hook identity (verified byte-for-byte against real
+    ~/.codex/config.toml [hooks.state] entries)."""
+    identity = {"event_name": _codex_event_key(event),
+                "hooks": [handler_norm]}
+    if event not in _CODEX_NO_MATCHER_EVENTS and matcher is not None:
+        identity["matcher"] = matcher
+    blob = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(blob.encode()).hexdigest()
+
+
+def codex_trust_entries(hooks_path: Path) -> list:
+    """Kinetic (--harness codex) command hooks in a Codex hooks.json, each
+    with the persisted trust key and expected hash that
+    ~/.codex/config.toml [hooks.state] must carry. [] when the file is
+    missing or unparseable."""
+    try:
+        cfg = json.loads(hooks_path.read_text())
+    except (OSError, ValueError):
+        return []
+    hooks = cfg.get("hooks") if isinstance(cfg, dict) else None
+    if not isinstance(hooks, dict):
+        return []
+    src = str(hooks_path)
+    out = []
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            continue
+        for gi, group in enumerate(groups):
+            ghooks = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(ghooks, list):
+                continue
+            matcher = group.get("matcher") if isinstance(group, dict) else None
+            for hi, handler in enumerate(ghooks):
+                if not _is_kinetic_codex_hook(handler):
+                    continue
+                norm = _codex_norm_handler(str(event), handler)
+                if norm is None:
+                    continue
+                out.append({
+                    "event": str(event),
+                    "command": norm["command"],
+                    "key": f"{src}:{_codex_event_key(str(event))}:{gi}:{hi}",
+                    "hash": _codex_hook_hash(str(event), matcher, norm),
+                })
+    return out
+
+
+# [hooks.state."<key>"] table headers in a Codex config.toml.
+_CODEX_STATE_HEADER = re.compile(
+    r'^\s*\[hooks\.state\."((?:[^"\\]|\\.)*)"\]\s*$')
+_CODEX_STATE_KV = re.compile(r'^\s*([A-Za-z_]+)\s*=\s*(.+?)\s*$')
+
+
+def _toml_string(raw: str):
+    """Unquote a TOML basic-string literal well enough for state values."""
+    raw = raw.strip()
+    if len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"':
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return raw[1:-1]
+    return raw.strip("'\"")
+
+
+def codex_hook_states(config_path: Path) -> dict:
+    """{state_key: {"trusted_hash": str|None, "enabled": bool|None}} parsed
+    from a Codex config.toml's [hooks.state."<key>"] tables. Targeted parse:
+    only the two keys Codex writes are read; the file need not be valid
+    TOML elsewhere."""
+    states = {}
+    try:
+        lines = config_path.read_text().splitlines()
+    except OSError:
+        return states
+    current = None
+    for line in lines:
+        m = _CODEX_STATE_HEADER.match(line)
+        if m:
+            current = m.group(1).replace('\\"', '"').replace("\\\\", "\\")
+            states.setdefault(current, {})
+            continue
+        if line.lstrip().startswith("["):
+            current = None
+            continue
+        if current is None:
+            continue
+        kv = _CODEX_STATE_KV.match(line)
+        if not kv:
+            continue
+        key, raw = kv.group(1), kv.group(2)
+        if key == "trusted_hash":
+            states[current]["trusted_hash"] = _toml_string(raw)
+        elif key == "enabled":
+            states[current]["enabled"] = raw.strip().lower() == "true"
+    return states
+
+
+def codex_trust_report(hooks_path: Path, config_path: Path) -> dict:
+    """How many kinetic hooks in hooks_path are trusted per config_path's
+    [hooks.state]: entries must carry the expected trusted_hash and must not
+    be disabled. State keys are tried under both the literal and resolved
+    hooks.json paths (CODEX_HOME/symlink spellings differ)."""
+    entries = codex_trust_entries(hooks_path)
+    states = codex_hook_states(config_path)
+    alt = str(hooks_path.resolve()) if hooks_path.exists() else None
+    untrusted = []
+    for e in entries:
+        keys = [e["key"]]
+        if alt and alt != str(hooks_path):
+            keys.append(e["key"].replace(str(hooks_path), alt, 1))
+        st = next((states[k] for k in keys if k in states), None)
+        ok = (st is not None
+              and st.get("enabled") is not False
+              and st.get("trusted_hash") == e["hash"])
+        if not ok:
+            untrusted.append(e)
+    return {"entries": len(entries),
+            "trusted": len(entries) - len(untrusted),
+            "untrusted": untrusted}
+
+
+def _strip_marked_hooks(hooks: dict, marker: str) -> dict:
+    """hooks minus every hook entry whose command contains marker; groups
+    left empty are dropped. Malformed event values and groups are preserved."""
+    out = {}
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            out[event] = groups
+            continue
+        kept_groups = []
+        for g in groups:
+            ghooks = g.get("hooks") if isinstance(g, dict) else None
+            if not isinstance(ghooks, list):
+                kept_groups.append(g)
+                continue
+            kept = [h for h in ghooks
+                    if not (isinstance(h, dict)
+                            and marker in str(h.get("command") or ""))]
+            if kept:
+                kept_groups.append({**g, "hooks": kept})
+        if kept_groups:
+            out[event] = kept_groups
+        # an event left with no groups is dropped (equivalent to [])
+    return out
+
+
+def _merge_hook_groups(hooks: dict, new_groups: dict,
+                       marker: str) -> dict:
+    """hooks with new_groups merged per event after stripping entries that
+    carry marker. A non-list foreign event value is preserved and ours is
+    skipped for that event."""
+    merged = _strip_marked_hooks(hooks, marker)
+    for event, groups in new_groups.items():
+        existing = merged.get(event)
+        if existing is None:
+            merged[event] = list(groups)
+        elif isinstance(existing, list):
+            existing.extend(groups)
+    return merged
+
+
+def _merge_codex_hooks_file(cfg: dict, clone: Path) -> dict:
+    """Return cfg (a Codex hooks.json object) with kinetic's hook groups
+    merged into cfg["hooks"], replacing previously generated entries.
+    Raises ValueError when the existing "hooks" value is not an object."""
+    hooks = cfg.get("hooks")
+    if hooks is None:
+        hooks = {}
+    if not isinstance(hooks, dict):
+        raise ValueError('"hooks" in the Codex hooks.json must be a JSON object')
+    cfg["hooks"] = _merge_hook_groups(hooks, codex_hook_groups(clone),
+                                      "--harness codex")
+    return cfg
+
+
+def _codex_generated_files(clone: Path, home: Path,
+                           settings_path: Path) -> dict:
+    """All files _install_codex writes, {path: text}, for preflight and
+    manifest recording."""
+    out = _codex_skill_files(clone, _agents_skills_dir(home))
+    out.update(_codex_agent_files(clone, _codex_agents_dir(home),
+                                  settings_path))
+    return out
+
+
+def _install_codex(clone: Path, home: Path) -> int:
+    launcher = clone / "bin" / "kinetic"
+    link = _bin_dir(home) / "kinetic"
+    manifest_path = _manifest_path(home, "codex")
+    prev = _read_manifest(manifest_path) or {}
+    prev_files = prev.get("files") or {}
+    hooks_path = _codex_hooks_path(home)
+    settings_path = _settings_path(home)
+
+    if shutil.which("codex") is None:
+        print("kinetic install: 'codex' CLI not found on PATH; install Codex "
+              "CLI first", file=sys.stderr)
+        return 1
+
+    # Preflight everything that can fail before any file is written. The
+    # settings check comes first: tier resolution reads it.
+    try:
+        _load(settings_path)
+    except ConfigError as e:
+        print(f"kinetic install: {e}", file=sys.stderr)
+        return 1
+    try:
+        generated = _codex_generated_files(clone, home, settings_path)
+        hooks_cfg, hooks_existed = _read_json_object(hooks_path)
+        merged_hooks = _merge_codex_hooks_file(dict(hooks_cfg), clone)
+    except ValueError as e:
+        print(f"kinetic install: {e}", file=sys.stderr)
+        return 1
+    prev_hcfg = prev.get("codex_hooks") or {}
+    if prev_hcfg.get("path") == str(hooks_path):
+        hooks_existed = bool(prev_hcfg.get("existed", hooks_existed))
+
+    if _ensure_link(link, launcher, prev_files) != 0:
+        return 1
+    res = _write_install_settings(home, clone, "codex", prev)
+    if res is None:
+        return 1
+    sp, existed, previous = res
+
+    for path, text in generated.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, text)
+    hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(hooks_path,
+                 json.dumps(merged_hooks, indent=2, sort_keys=True) + "\n")
+
+    files = {str(link): _link_entry(link, launcher)}
+    for path in generated:
+        files[str(path)] = {"type": "file", "sha256": _hash_file(path)}
+    manifest = {
+        "version": MANIFEST_VERSION,
+        "harness": "codex",
+        "clone": str(clone),
+        "files": files,
+        "settings": _settings_manifest(sp, "codex", clone, existed, previous),
+        "codex_hooks": {"path": str(hooks_path), "existed": hooks_existed},
+    }
+    atomic_write(manifest_path,
+                 json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    print("installed kinetic for harness codex")
+    print(f"  launcher: {link} -> {launcher}")
+    print(f"  skills: {len(generated)} generated files under "
+          f"{_agents_skills_dir(home)} (invoke as $kntc-<name>)")
+    print(f"  agents: {_codex_agents_dir(home)}/*.toml")
+    print(f"  hooks: {hooks_path} (merged, --harness codex)")
+    print(f"  settings: harness=codex clone={clone} in {sp}")
+    print(f"  manifest: {manifest_path}")
+    print()
+    print("Codex CLI: open Codex and run /hooks to review and trust "
+          "kinetic's hooks — they stay inactive until trusted. "
+          "kinetic doctor reports trust state.")
+    print()
+    print("Make sure ~/.local/bin is on your PATH (it is on most macOS/Linux "
+          "setups; add it to your shell profile if `kinetic` is not found), "
+          "then re-run `kinetic install --harness codex` after `git pull` "
+          "to pick up updates.")
+    return 0
+
+
+def _strip_codex_hooks(path: Path, existed: bool):
+    """Remove kinetic's `--harness codex` hooks from a Codex hooks.json,
+    preserving everything else. Returns a warning or None."""
+    if not path.is_file():
+        return None
+    try:
+        cfg = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        return f"left {path}: {e}"
+    if not isinstance(cfg, dict):
+        return f"left {path}: not a JSON object"
+    hooks = cfg.get("hooks")
+    if isinstance(hooks, dict):
+        stripped = _strip_marked_hooks(hooks, "--harness codex")
+        if stripped:
+            cfg["hooks"] = stripped
+        else:
+            cfg.pop("hooks", None)
+    elif hooks is not None:
+        return f"left {path}: 'hooks' is not an object; kinetic hooks may remain"
+    if not cfg:
+        if existed:
+            atomic_write(path, "{}\n")
+        else:
+            path.unlink()
+        return None
+    atomic_write(path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+    return None
 
 
 def _remove_listed(path: Path, meta: dict):
@@ -566,6 +1118,41 @@ def _uninstall(harness_id: str, home: Path) -> int:
         elif dpath.exists():
             kept.append(str(dpath) + " (foreign entries kept)")
 
+    cconf = manifest.get("codex_hooks")
+    if isinstance(cconf, dict) and cconf.get("path"):
+        cpath = Path(cconf["path"])
+        warn = _strip_codex_hooks(cpath, bool(cconf.get("existed")))
+        if warn:
+            warnings.append(warn)
+        elif cpath.exists():
+            kept.append(str(cpath) + " (foreign entries kept)")
+        # prune directories that only held files this uninstall removed
+        # (kntc-<name>/ and kntc-<name>/agents/ under ~/.agents/skills, and
+        # ~/.codex/agents itself when empty)
+        stops = (_agents_skills_dir(home), _codex_agents_dir(home))
+        dirs = set()
+        for name in removed:
+            p = Path(name)
+            for stop in stops:
+                try:
+                    p.relative_to(stop)
+                except ValueError:
+                    continue
+                cur = p
+                while cur != stop:
+                    dirs.add(cur)
+                    cur = cur.parent
+        for d in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+        for stop in stops:
+            try:
+                stop.rmdir()
+            except OSError:
+                pass
+
     plugin = manifest.get("plugin")
     pname = plugin.get("name") if isinstance(plugin, dict) else None
     if isinstance(pname, str) and pname:
@@ -621,6 +1208,8 @@ def main(argv=None) -> int:
         return _install_claude(clone, home)
     if a.harness == "devin":
         return _install_devin(clone, home)
+    if a.harness == "codex":
+        return _install_codex(clone, home)
     print(f"kinetic install: --harness {a.harness} is not yet supported",
           file=sys.stderr)
     return 1

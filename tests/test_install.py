@@ -170,7 +170,7 @@ class InstallClaudeTest(InstallCase):
         self.assertFalse(self.link.exists())
 
     def test_unsupported_harness_writes_nothing(self):
-        for hid in ("codex", "opencode"):
+        for hid in ("opencode",):
             p = self._install("--harness", hid)
             self.assertNotEqual(p.returncode, 0, hid)
             self.assertIn("not yet supported", p.stderr)
@@ -411,6 +411,256 @@ class InstallDevinTest(InstallCase):
                          "echo foreign")
         cmds = self._devin_hook_commands(cfg)
         self.assertFalse(any("--harness devin" in c for c in cmds))
+
+
+class InstallCodexTest(InstallCase):
+    """`kinetic install --harness codex` generates files only: kntc-<name>
+    stub skills under ~/.agents/skills, agent TOML under ~/.codex/agents and
+    a merged ~/.codex/hooks.json. It never shells out to codex (hook trust is
+    a manual /hooks step); it only requires the CLI on PATH."""
+
+    USER_ONLY = {"ask", "doctor", "implement", "init", "run", "status"}
+    SKILL_NAMES = {"ask", "doctor", "grill", "implement", "init", "retro",
+                   "run", "ship", "spec", "status", "tdd", "tickets"}
+    AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
+                   "integration-reviewer", "spec-reviewer",
+                   "standards-reviewer"}
+
+    def setUp(self):
+        super().setUp()
+        # the codex installer reads skills/ and agents/ from the clone
+        shutil.copytree(ROOT / "skills", self.clone / "skills",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(ROOT / "agents", self.clone / "agents",
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        self.base_path = os.environ.get("PATH", "")
+        self.bin = self.tmp / "codex-bin"
+        self.bin.mkdir()
+        codex = self.bin / "codex"
+        codex.write_text("#!/bin/sh\nexit 0\n")
+        codex.chmod(0o755)
+        patcher = mock.patch.dict(
+            os.environ, {"PATH": f"{self.bin}:{self.base_path}"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @property
+    def skills_dir(self):
+        return self.home / ".agents" / "skills"
+
+    @property
+    def agents_dir(self):
+        return self.home / ".codex" / "agents"
+
+    @property
+    def hooks_json(self):
+        return self.home / ".codex" / "hooks.json"
+
+    @property
+    def manifest_path(self):
+        return (self.home / ".config" / "kinetic"
+                / "install-manifest-codex.json")
+
+    def _hook_commands(self, cfg=None):
+        cfg = cfg if cfg is not None else json.loads(
+            self.hooks_json.read_text())
+        return [h.get("command", "")
+                for groups in (cfg.get("hooks") or {}).values()
+                for g in groups
+                for h in (g.get("hooks") or [])]
+
+    def _stub(self, name):
+        return self.skills_dir / f"kntc-{name}" / "SKILL.md"
+
+    def _skill_frontmatter(self, path):
+        text = path.read_text()
+        assert text.startswith("---\n")
+        fm = text.split("---\n", 2)[1]
+        return fm
+
+    def test_install_writes_stubs_agents_hooks_and_state(self):
+        p = self._install("--harness", "codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+        self.assertTrue(self.link.is_symlink())
+        settings = self._settings()
+        self.assertEqual(settings["harness"], "codex")
+        self.assertEqual(settings["clone"], str(self.clone))
+
+        # one kntc-<name> stub per skill
+        for name in self.SKILL_NAMES:
+            stub = self._stub(name)
+            self.assertTrue(stub.is_file(), name)
+            text = stub.read_text()
+            self.assertIn(f"name: kntc-{name}", text)
+            # the description is YAML-quoted because it contains ": "
+            self.assertIn('description: "kinetic: ', text)
+            self.assertIn(f"{self.clone}/skills/{name}/SKILL.md", text)
+
+        # user-only skills get agents/openai.yaml disabling implicit invocation
+        for name in self.SKILL_NAMES:
+            oy = (self.skills_dir / f"kntc-{name}" / "agents"
+                  / "openai.yaml")
+            if name in self.USER_ONLY:
+                self.assertTrue(oy.is_file(), name)
+                self.assertIn("allow_implicit_invocation: false",
+                              oy.read_text())
+            else:
+                self.assertFalse(oy.exists(), name)
+
+        # agent TOML files, one per agents/*.md
+        for name in self.AGENT_NAMES:
+            toml_path = self.agents_dir / f"{name}.toml"
+            self.assertTrue(toml_path.is_file(), name)
+            text = toml_path.read_text()
+            self.assertIn(f'name = "{name}"', text)
+            self.assertIn("developer_instructions", text)
+            self.assertIn("model = ", text)
+            self.assertIn("model_reasoning_effort = ", text)
+        impl = (self.agents_dir / "implementer.toml").read_text()
+        strong = (self.agents_dir / "implementer-strong.toml").read_text()
+        self.assertIn('name = "kntc-tdd"', impl)
+        self.assertIn('name = "kntc-tdd"', strong)
+        # tier -> model mapping: strong resolves differently than standard
+        from kinetic import harness as _h
+        std = _h.resolve_tier("codex", "standard",
+                              settings=self.settings_path)
+        sst = _h.resolve_tier("codex", "strong",
+                              settings=self.settings_path)
+        self.assertIn(f'model = "{std["model"]}"', impl)
+        self.assertIn(f'model = "{sst["model"]}"', strong)
+        self.assertIn(f'model_reasoning_effort = "{std["effort"]}"', impl)
+        self.assertIn(f'model_reasoning_effort = "{sst["effort"]}"',
+                      strong)
+
+        # hooks.json: seven kinetic entries marked --harness codex
+        cmds = self._hook_commands()
+        ours = [c for c in cmds if "--harness codex" in c]
+        self.assertEqual(len(ours), 7)
+        self.assertTrue(any("isolation.py" in c and str(self.clone) in c
+                            for c in ours))
+        self.assertTrue(any("completion_gate.py" in c for c in ours))
+        self.assertTrue(any("orient.py" in c for c in ours))
+        self.assertIn("/hooks", p.stdout)
+        self.assertIn("kntc-", p.stdout)
+
+        m = json.loads(self.manifest_path.read_text())
+        self.assertEqual(m["harness"], "codex")
+        self.assertEqual(m["clone"], str(self.clone))
+        # every generated file is manifest-listed for staleness checks
+        for f in (self._stub("run"), self.agents_dir / "implementer.toml"):
+            self.assertIn(str(f), m["files"])
+
+    def test_install_codex_is_idempotent(self):
+        self.assertEqual(self._install("--harness", "codex").returncode, 0)
+        first_hooks = self.hooks_json.read_text()
+        first_manifest = self.manifest_path.read_text()
+        p = self._install("--harness", "codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.hooks_json.read_text(), first_hooks)
+        self.assertEqual(self.manifest_path.read_text(), first_manifest)
+
+    def test_install_codex_preserves_foreign_hooks(self):
+        self.hooks_json.parent.mkdir(parents=True)
+        foreign = {"description": "user hooks",
+                   "hooks": {"PreToolUse": [
+                       {"matcher": "Bash",
+                        "hooks": [{"type": "command",
+                                   "command": "echo foreign"}]}],
+                       "Stop": [{"hooks": [{"type": "command",
+                                             "command": "echo bye"}]}]}}
+        self.hooks_json.write_text(json.dumps(foreign))
+        p = self._install("--harness", "codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+        cfg = json.loads(self.hooks_json.read_text())
+        self.assertEqual(cfg["description"], "user hooks")
+        pre = cfg["hooks"]["PreToolUse"]
+        self.assertTrue(any(h["command"] == "echo foreign"
+                            for g in pre for h in g["hooks"]))
+        self.assertTrue(any("--harness codex" in h["command"]
+                            for g in pre for h in g["hooks"]))
+        self.assertTrue(any(h["command"] == "echo bye"
+                            for g in cfg["hooks"]["Stop"]
+                            for h in g["hooks"]))
+
+        # re-run converges: foreign entries kept, ours not duplicated
+        p = self._install("--harness", "codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        cmds = self._hook_commands()
+        self.assertEqual(len([c for c in cmds if "--harness codex" in c]), 7)
+        self.assertIn("echo foreign", cmds)
+        self.assertIn("echo bye", cmds)
+
+    def test_install_codex_replaces_stale_clone_paths(self):
+        self.assertEqual(self._install("--harness", "codex").returncode, 0)
+        moved = self.tmp / "clone2"
+        shutil.copytree(self.clone, moved, symlinks=True)
+        _git(moved, "init")
+        p = self._install("--harness", "codex", clone=moved)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        cmds = [c for c in self._hook_commands() if "--harness codex" in c]
+        self.assertTrue(cmds)
+        self.assertTrue(all(str(moved) in c for c in cmds))
+        self.assertFalse(any(str(self.clone) + "/" in c for c in cmds))
+        # stubs point at the new clone too
+        self.assertIn(str(moved), self._stub("run").read_text())
+
+    def test_install_codex_fails_without_cli(self):
+        # a PATH with git (needed by the clone check) but no codex
+        nogit = self.tmp / "no-codex-bin"
+        nogit.mkdir()
+        (nogit / "git").symlink_to(shutil.which("git"))
+        with mock.patch.dict(os.environ, {"PATH": str(nogit)}):
+            p = self._install("--harness", "codex")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("codex", p.stderr.lower())
+        self.assertFalse(self.manifest_path.exists())
+        self.assertFalse(self.settings_path.exists())
+        self.assertFalse(self.hooks_json.exists())
+
+    def test_install_codex_rejects_malformed_hooks_json(self):
+        self.hooks_json.parent.mkdir(parents=True)
+        self.hooks_json.write_text(json.dumps({"hooks": []}))
+        p = self._install("--harness", "codex")
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("hooks", p.stderr)
+        self.assertEqual(self.hooks_json.read_text(),
+                         json.dumps({"hooks": []}))
+        self.assertFalse(self.manifest_path.exists())
+
+    # --- uninstall ---------------------------------------------------------
+
+    def test_uninstall_codex_removes_everything_it_wrote(self):
+        self.assertEqual(self._install("--harness", "codex").returncode, 0)
+        p = self._uninstall("codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+        self.assertFalse(os.path.lexists(self.link))
+        self.assertFalse(self.settings_path.exists())
+        self.assertFalse(self.manifest_path.exists())
+        for name in self.SKILL_NAMES:
+            self.assertFalse(self._stub(name).exists(), name)
+        for name in self.AGENT_NAMES:
+            self.assertFalse((self.agents_dir / f"{name}.toml").exists(),
+                             name)
+        # hooks.json held only our entries -> the file we created is gone
+        self.assertFalse(self.hooks_json.exists())
+        # generated dirs are pruned when empty
+        self.assertFalse((self.home / ".agents" / "skills").exists())
+        self.assertFalse((self.home / ".codex" / "agents").exists())
+
+    def test_uninstall_codex_restores_foreign_hooks(self):
+        self.hooks_json.parent.mkdir(parents=True)
+        self.hooks_json.write_text(json.dumps({"hooks": {"Stop": [
+            {"hooks": [{"type": "command", "command": "echo foreign"}]}]}}))
+        self.assertEqual(self._install("--harness", "codex").returncode, 0)
+        p = self._uninstall("codex")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        cfg = json.loads(self.hooks_json.read_text())
+        cmds = self._hook_commands(cfg)
+        self.assertFalse(any("--harness codex" in c for c in cmds))
+        self.assertIn("echo foreign", cmds)
 
 
 class UninstallTest(InstallCase):

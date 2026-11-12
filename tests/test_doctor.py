@@ -335,14 +335,115 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(c["hooks-registered"]["status"], "fail")
         self.assertIn("clone path missing", c["hooks-registered"]["fix"])
 
-    def test_hooks_trusted_stub_on_codex(self):
+    def _codex_hooks_json(self, clone, foreign=None):
+        """Write ~/.codex/hooks.json with kinetic's codex hook groups plus
+        optional foreign entries, as `kinetic install --harness codex` does."""
+        hooks_path = self.home / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        groups = install.codex_hook_groups(clone)
+        if foreign:
+            for event, g in foreign.items():
+                groups.setdefault(event, []).extend(g)
+        hooks_path.write_text(json.dumps({"hooks": groups}))
+        return hooks_path
+
+    def _codex_trust_all(self, hooks_path, enabled=True):
+        """Write ~/.codex/config.toml [hooks.state] entries trusting every
+        kinetic hook in hooks_path, as Codex records them after /hooks."""
+        cfg_path = self.home / ".codex" / "config.toml"
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for e in install.codex_trust_entries(hooks_path):
+            lines.append(f'[hooks.state."{e["key"]}"]')
+            lines.append(f'trusted_hash = "{e["hash"]}"')
+            if not enabled:
+                lines.append("enabled = false")
+        cfg_path.write_text("\n".join(lines) + "\n")
+        return cfg_path
+
+    def test_codex_hooks_registered_and_trusted(self):
         clone = self._fake_clone("codex-clone")
         self._write_settings(harness="codex", clone=str(clone))
         c = self._by_name()
+        # no hooks.json at all -> warn to install
+        self.assertEqual(c["hooks-registered"]["status"], "warn")
+        self.assertIn("kinetic install --harness codex",
+                      c["hooks-registered"]["fix"])
+
+        hooks_path = self._codex_hooks_json(clone)
+        c = self._by_name()
         self.assertEqual(c["hooks-registered"]["status"], "pass")
-        # trust cannot be verified yet; the Codex ticket refines this
-        self.assertEqual(c["hooks-trusted"]["status"], "warn")
+        # registered but not yet trusted via /hooks -> fail (US7)
+        self.assertEqual(c["hooks-trusted"]["status"], "fail")
         self.assertIn("/hooks", c["hooks-trusted"]["fix"])
+
+        self._codex_trust_all(hooks_path)
+        c = self._by_name()
+        self.assertEqual(c["hooks-trusted"]["status"], "pass")
+
+    def test_codex_hooks_trusted_modified_and_disabled_fail(self):
+        clone = self._fake_clone("codex-clone")
+        self._write_settings(harness="codex", clone=str(clone))
+        hooks_path = self._codex_hooks_json(clone)
+
+        # a trusted_hash that does not match the current definition -> fail
+        cfg_path = self.home / ".codex" / "config.toml"
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        entries = install.codex_trust_entries(hooks_path)
+        lines = []
+        for e in entries:
+            lines.append(f'[hooks.state."{e["key"]}"]')
+            lines.append('trusted_hash = "sha256:00"')
+        cfg_path.write_text("\n".join(lines) + "\n")
+        c = self._by_name()
+        self.assertEqual(c["hooks-trusted"]["status"], "fail")
+
+        # trusted but disabled -> the hook will not run -> fail
+        self._codex_trust_all(hooks_path, enabled=False)
+        c = self._by_name()
+        self.assertEqual(c["hooks-trusted"]["status"], "fail")
+
+    def test_codex_manifest_file_entries_checked_for_staleness(self):
+        clone = self._fake_clone("codex-clone")
+        self._write_settings(harness="codex", clone=str(clone))
+        gen = self.home / ".agents" / "skills" / "kntc-run" / "SKILL.md"
+        gen.parent.mkdir(parents=True)
+        gen.write_text("stub")
+        import hashlib
+        self._write_manifest(
+            "codex", clone=clone,
+            files={str(gen): {"type": "file",
+                              "sha256": hashlib.sha256(b"stub").hexdigest()}})
+        c = self._by_name()
+        self.assertEqual(c["install-manifest"]["status"], "pass")
+        gen.write_text("edited")
+        c = self._by_name()
+        self.assertEqual(c["install-manifest"]["status"], "fail")
+
+    def test_codex_hooks_registered_missing_and_stale_clone(self):
+        clone = self._fake_clone("codex-clone")
+        self._write_settings(harness="codex", clone=str(clone))
+        # hooks.json exists but holds only foreign entries
+        hooks_path = self.home / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        hooks_path.write_text(json.dumps({"hooks": {"Stop": [
+            {"hooks": [{"type": "command", "command": "echo foreign"}]}]}}))
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "fail")
+        self.assertIn("kinetic install --harness codex",
+                      c["hooks-registered"]["fix"])
+
+        # entries point at a different clone path -> treated as missing
+        moved = self._fake_clone("codex-clone2")
+        hooks_path.write_text(json.dumps(
+            {"hooks": install.codex_hook_groups(moved)}))
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "fail")
+
+        # malformed hooks.json -> fail, not crash
+        hooks_path.write_text("{bad")
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "fail")
 
     def test_tier_mapping_check(self):
         clone = self._fake_clone()

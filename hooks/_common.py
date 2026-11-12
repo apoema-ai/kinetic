@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -67,7 +68,10 @@ def _tool_aliases(harness: str) -> dict:
     aliases = {}
     if tools.get("shell"):
         aliases[tools["shell"]] = "Bash"
-    for name in tools.get("edit") or []:
+    edit_names = list(tools.get("edit") or [])
+    if tools.get("patch") and tools["patch"] not in edit_names:
+        edit_names.append(tools["patch"])
+    for name in edit_names:
         aliases[name] = "Write"
     return aliases
 
@@ -99,10 +103,56 @@ def _norm_devin(inp: dict) -> dict:
     return out
 
 
-# Per-harness input normalisers. claude (and, until their tickets land, codex
-# and opencode) pass through untouched: their payloads already are, or will be
-# forwarded in, today's shape. Codex adds apply_patch header parsing here.
-_NORMALIZERS = {"devin": _norm_devin}
+# Codex's apply_patch grammar carries one or more file operations in
+# tool_input.command: "*** Begin Patch", then "*** Add File: <path>",
+# "*** Delete File: <path>", "*** Update File: <path>" headers and, inside an
+# update hunk, "*** Move to: <path>". Paths are workspace-relative and may
+# contain spaces; "*** Begin/End Patch" and "*** End of File" never match.
+_PATCH_PATH = re.compile(
+    r"^\*\*\*\s+(?:Add File|Delete File|Update File|Move to):"
+    r"[ \t]*(\S.*?)\s*$",
+    re.M)
+
+
+def _patch_paths(command) -> list:
+    """Ordered unique file paths referenced by a Codex apply_patch payload."""
+    if not isinstance(command, str):
+        return []
+    seen, out = set(), []
+    for m in _PATCH_PATH.finditer(command):
+        path = m.group(1).strip()
+        if path and path not in seen:
+            seen.add(path)
+            out.append(path)
+    return out
+
+
+def _norm_codex(inp: dict) -> dict:
+    """Normalise a Codex CLI hook payload into the Claude shape the hooks read.
+
+    Codex already sends session_id, cwd, tool_name and tool_input in the
+    Claude-compatible field names, so only tool names need mapping (shell is
+    "Bash", file edits are "apply_patch"). apply_patch carries the raw patch
+    text in tool_input.command; every file header is extracted into
+    tool_input.file_paths. The list is set even when empty so fail-closed
+    hooks can tell "no paths parsed" apart from "not a patch tool"."""
+    out = dict(inp)
+    raw_ti = inp.get("tool_input")
+    ti = dict(raw_ti) if isinstance(raw_ti, dict) else {}
+    name = out.get("tool_name")
+    alias = _tool_aliases("codex").get(name)
+    if alias:
+        out["tool_name"] = alias
+    if name == "apply_patch":
+        text = ti.get("command") or ti.get("patch") or ti.get("input") or ""
+        ti["file_paths"] = _patch_paths(text)
+    out["tool_input"] = ti
+    return out
+
+
+# Per-harness input normalisers. claude passes through untouched; codex and
+# opencode arrive in their tickets. Codex adds apply_patch header parsing.
+_NORMALIZERS = {"devin": _norm_devin, "codex": _norm_codex}
 
 
 def _normalize(inp: dict, harness: str) -> dict:

@@ -53,7 +53,15 @@ Devin CLI:
 <path-to-kinetic>/bin/kinetic install --harness devin
 ```
 
+Codex CLI:
+
+```
+<path-to-kinetic>/bin/kinetic install --harness codex
+```
+
 `kinetic install` links `kinetic` onto your PATH (`~/.local/bin` — make sure that directory is on your PATH), records the harness and clone in `~/.config/kinetic/settings.json`, and writes an install manifest that `doctor` checks for staleness. Re-run it after `git pull`; `kinetic install --harness <h> --uninstall` removes everything it wrote. On Claude Code, plugin registration itself (`claude --plugin-dir`) stays manual; on Devin CLI the installer runs `devin plugins install --local <clone>` itself (skills appear as `/kinetic:<name>`) and writes Devin-format hooks into `~/.config/devin/config.json`, preserving any foreign entries. Devin support is validated by the manual checklist in `docs/smoke/devin.md`.
+
+On Codex CLI the installer is file generation only: it writes `kntc-<name>` stub skills under `~/.agents/skills` (user-only skills get an `agents/openai.yaml` sidecar with `policy.allow_implicit_invocation: false`), agent definitions under `~/.codex/agents/*.toml` with the tier resolved to `model`/`model_reasoning_effort` (override via `tiers.codex` in `settings.json`), and merges kinetic's hooks into `~/.codex/hooks.json`, preserving foreign entries. Codex gates hooks behind interactive trust: after install, open Codex and run `/hooks` to review and trust kinetic's hooks — they stay inactive until trusted, and `kinetic doctor` fails its `hooks-trusted` check until the `trusted_hash` state matches. Codex support is validated by the manual checklist in `docs/smoke/codex.md`. Known Codex limitations: per-agent tool allow-lists are not honoured (the `tools:` frontmatter has no Codex agent equivalent), and the write-op/deploy confirmation hooks only fire on tool names matching `mcp__.*` patterns — verify MCP tool naming during the smoke run.
 
 Optional companions that kinetic uses when present and falls back without: the `find-ticket-repos`, `checkout-ticket-repos` and `resolving-merge-conflicts` skills and the `superpowers` and `dev-fleet` plugins, installed wherever the harness keeps skills and plugins (`~/.claude/skills` and `~/.claude/plugins` on Claude Code; `~/.config/devin/skills` or `~/.agents/skills` and `devin plugins install` on Devin CLI). `/kinetic:doctor` reports which are missing.
 
