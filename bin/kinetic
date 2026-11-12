@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""kinetic launcher.
+
+Installed as ~/.local/bin/kinetic (a symlink to <clone>/bin/kinetic) by
+`kinetic install`. Resolves the clone root from this file's real location —
+the symlink is followed — puts <clone>/scripts on sys.path and PYTHONPATH,
+then dispatches `kinetic <module> ...` to the clone's kinetic package.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+os.environ["PYTHONPATH"] = (
+    str(ROOT / "scripts") + os.pathsep + os.environ.get("PYTHONPATH", "")
+).rstrip(os.pathsep)
+
+from kinetic.__main__ import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

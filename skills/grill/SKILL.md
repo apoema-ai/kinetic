@@ -8,7 +8,7 @@ model: sonnet
 
 Interview the user relentlessly until you reach a shared understanding, and write the domain language and key decisions down as they crystallise.
 
-The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`) and the ref being grilled. Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`. This skill never invokes another skill.
+The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`) and the ref being grilled. Run scripts as `kinetic <module> ...`. This skill never invokes another skill.
 
 Write the domain docs under `<dir>/docs/`, never into a repo checkout: the isolation hook denies writes outside the run directory and registered repos, and the orchestrator points implementers at `<dir>/docs/`. Read a repo's own `GLOSSARY.md` and ADRs if it has them; when updating one, copy it into `<dir>/docs/` first and edit the copy.
 
@@ -84,7 +84,7 @@ Offer an ADR only when all three are true: the decision is **hard to reverse**, 
 When the user confirms shared understanding, finish with a short summary of the decisions, threat model and NFRs. Record any deliberate trade-off the user ruled on:
 
 ```
-PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.state add-ruling --run <dir> --what "..." --why "..." --cost "..."
+kinetic state add-ruling --run <dir> --what "..." --why "..." --cost "..."
 ```
 
 The orchestrator owns phase changes and gates; do not set them here.

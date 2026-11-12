@@ -35,10 +35,17 @@ class HookCase(unittest.TestCase):
         ptr.mkdir(parents=True)
         (ptr / "active-run").write_text(str(self.run_dir))
 
-    def hook(self, name, payload):
-        env = dict(os.environ, HOME=str(self.home))
-        p = subprocess.run([sys.executable, str(HOOKS / f"{name}.py")], input=json.dumps(payload),
-                           capture_output=True, text=True, env=env)
+    def hook(self, name, payload, harness=None, env=None):
+        """Run a hook as a subprocess. payload is a dict (JSON-encoded) or a raw
+        stdin string; harness adds --harness <id>; env merges extra variables
+        (e.g. DEVIN_PROJECT_DIR) over HOME=temp-home."""
+        argv = [sys.executable, str(HOOKS / f"{name}.py")]
+        if harness:
+            argv += ["--harness", harness]
+        merged = dict(os.environ, HOME=str(self.home))
+        merged.update(env or {})
+        data = payload if isinstance(payload, str) else json.dumps(payload)
+        p = subprocess.run(argv, input=data, capture_output=True, text=True, env=merged)
         self.assertEqual(p.returncode, 0, p.stderr)
         return json.loads(p.stdout) if p.stdout.strip() else None
 
@@ -111,7 +118,7 @@ class StopGate(HookCase):
         out = self.hook("completion_gate", {"stop_hook_active": False})
         self.assertEqual(out["decision"], "block")
         self.assertIn("api", out["reason"])
-        self.assertIn("kinetic.verify", out["reason"])
+        self.assertIn("kinetic verify", out["reason"])
 
     def test_stop_allows_after_passing_verify(self):
         self.activate()
@@ -348,6 +355,514 @@ class Confirm(HookCase):
         self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
 
 
+class DevinHooks(HookCase):
+    """Devin CLI payloads as documented at docs.devin.ai/cli/extensibility/hooks:
+    hook_event_name/prompt_id extras, session_id, no cwd (DEVIN_PROJECT_DIR env
+    carries the project root), tool names exec/edit/write. Devin's PreToolUse
+    output is a top-level {"decision": "block"|"approve", "reason"}; it has no
+    "ask", so ask renders as the Claude-format hookSpecificOutput and Devin's
+    own permission flow remains the prompt."""
+
+    def devin(self, name, payload, cwd=None, **kw):
+        # Always set DEVIN_PROJECT_DIR ("" when absent) so a value leaking in
+        # from the developer's environment cannot change the result.
+        env = {"DEVIN_PROJECT_DIR": str(cwd) if cwd is not None else ""}
+        return self.hook(name, payload, harness="devin", env=env, **kw)
+
+    def edit(self, path, **extra):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "edit",
+                   "tool_input": {"file_path": path},
+                   "session_id": "s1", "prompt_id": "p1"}
+        payload.update(extra)
+        return payload
+
+    def exec_tool(self, cmd, sid="s1"):
+        return {"hook_event_name": "PreToolUse", "tool_name": "exec",
+                "tool_input": {"command": cmd, "shell_id": "main"},
+                "session_id": sid, "prompt_id": "p1"}
+
+    def test_isolation_denies_outside_in_devin_shape(self):
+        self.activate()
+        out = self.devin("isolation", self.edit("/etc/passwd"), cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("outside the run workspace", out["reason"])
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_isolation_allows_repo_and_project_dir_supplies_cwd(self):
+        self.activate()
+        self.assertIsNone(self.devin("isolation",
+                                     self.edit(str(self.repo / "a.py")), cwd=self.repo))
+        # relative path resolves against DEVIN_PROJECT_DIR, not the hook's cwd
+        self.assertIsNone(self.devin("isolation", self.edit("sub/a.py"), cwd=self.repo))
+        # without DEVIN_PROJECT_DIR a relative path falls back to os.getcwd()
+        out = self.devin("isolation", self.edit("sub/a.py"))
+        self.assertEqual(out["decision"], "block")
+
+    def test_isolation_reads_path_alias(self):
+        self.activate()
+        p = self.edit("/etc/passwd")
+        p["tool_input"] = {"path": "/etc/passwd"}
+        out = self.devin("isolation", p, cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+
+    def test_exec_git_push_to_protected_branch_denied(self):
+        self.activate()
+        out = self.devin("confirm_write_ops", self.exec_tool("git push origin main"),
+                         cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("protected branch", out["reason"])
+
+    def test_exec_push_asks_without_top_level_decision(self):
+        self.activate()
+        out = self.devin("confirm_write_ops", self.exec_tool("git push origin feature"),
+                         cwd=self.repo)
+        self.assertIsNone(out.get("decision"))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertIn("confirm with the user", out["hookSpecificOutput"]
+                      ["permissionDecisionReason"])
+
+    def test_exec_readonly_command_is_silent(self):
+        self.activate()
+        self.assertIsNone(self.devin("confirm_write_ops",
+                                     self.exec_tool("git status"), cwd=self.repo))
+
+    def test_fail_closed_asks_in_devin_shape(self):
+        self.activate()
+        (self.run_dir / "state.json").write_text("{not json")
+        out = self.devin("isolation", self.edit("/etc/passwd"), cwd=self.repo)
+        self.assertIsNone(out.get("decision"))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertIn("could not decide", out["hookSpecificOutput"]
+                      ["permissionDecisionReason"])
+
+    def test_garbage_input_asks(self):
+        out = self.devin("confirm_write_ops", "{bad", cwd=self.repo)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_claim_run_and_session_scope_via_exec(self):
+        self.activate()
+        self.devin("claim_run", {"hook_event_name": "PostToolUse", "tool_name": "exec",
+                                 "tool_input": {"command": "printf '%s' /r | tee "
+                                                      "~/.config/kinetic/active-run",
+                                                "shell_id": "main"},
+                                 "session_id": "s1", "prompt_id": "p1"}, cwd=self.repo)
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
+        # another session is out of scope (its cwd is the project dir, not the run dir)
+        self.assertIsNone(self.devin("isolation", self.edit("/etc/passwd",
+                                                            session_id="s2"),
+                                     cwd=self.repo))
+        out = self.devin("isolation", self.edit("/etc/passwd"), cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+
+    def test_record_edit_stamps_repo_for_write_tool(self):
+        self.activate()
+        self.devin("record_edit", {"hook_event_name": "PostToolUse", "tool_name": "write",
+                                   "tool_input": {"file_path": str(self.repo / "a.py")},
+                                   "tool_response": {"success": True, "output": "",
+                                                     "error": None},
+                                   "session_id": "s1", "prompt_id": "p1"}, cwd=self.repo)
+        self.assertTrue(state.load(self.run_dir)["repos"]["api"]["last_edit_at"])
+
+    # Devin's apply_patch payload shape is undocumented; the normalizer tries
+    # the spellings the other harnesses use, with tool_input.command first.
+    def patch(self, *sections):
+        return "*** Begin Patch\n" + "".join(sections) + "*** End Patch"
+
+    def update(self, path, body="@@\n-old\n+new\n"):
+        return f"*** Update File: {path}\n{body}"
+
+    def apply_patch(self, command=None, tool_input=None, event="PreToolUse"):
+        ti = {"command": command} if tool_input is None else tool_input
+        return {"hook_event_name": event, "tool_name": "apply_patch",
+                "tool_input": ti, "session_id": "s1", "prompt_id": "p1"}
+
+    def test_apply_patch_outside_is_denied(self):
+        self.activate()
+        out = self.devin("isolation",
+                         self.apply_patch(self.patch(self.update("/etc/passwd"))),
+                         cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("outside the run workspace", out["reason"])
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_apply_patch_inside_repo_run_dir_and_relative_allowed(self):
+        self.activate()
+        for path in (str(self.repo / "a.py"), str(self.run_dir / "spec.md"),
+                     "sub/rel.py"):
+            out = self.devin("isolation",
+                             self.apply_patch(self.patch(self.update(path))),
+                             cwd=self.repo)
+            self.assertIsNone(out, path)
+
+    def test_apply_patch_multi_file_any_outside_denies(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "ok.py")),
+                           self.update("/etc/evil.py"))
+        out = self.devin("isolation", self.apply_patch(patch), cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("evil.py", out["reason"])
+
+    def test_apply_patch_alternate_input_spelling(self):
+        self.activate()
+        out = self.devin("isolation",
+                         self.apply_patch(tool_input={"patch": self.patch(
+                             self.update("/etc/passwd"))}),
+                         cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+
+    def test_apply_patch_unparseable_asks(self):
+        self.activate()
+        out = self.devin("isolation",
+                         self.apply_patch("not a patch at all"), cwd=self.repo)
+        self.assertIsNone(out.get("decision"))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_apply_patch_record_edit_stamps_each_path(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "a.py")),
+                           self.update(str(self.run_dir / "notes.md")))
+        self.devin("record_edit",
+                   self.apply_patch(patch, event="PostToolUse"), cwd=self.repo)
+        st = state.load(self.run_dir)
+        self.assertTrue(st["repos"]["api"]["last_edit_at"])
+        # run-dir artifacts are not code: the run_dir path must not stamp
+        # the top-level last_edit_at
+        self.assertFalse(st["last_edit_at"])
+
+    def test_stop_gate_blocks_in_devin_shape(self):
+        self.activate()
+        self.stamp(repo_edit=T3)
+        out = self.devin("completion_gate",
+                         {"hook_event_name": "Stop", "stop_hook_active": False,
+                          "session_id": "s1", "prompt_id": "p1",
+                          "last_assistant_message": "done"}, cwd=self.home)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("kinetic verify", out["reason"])
+
+    def test_orient_injects_context_for_session_start(self):
+        self.activate()
+        out = self.devin("orient", {"hook_event_name": "SessionStart",
+                                    "source": "startup", "session_id": "s1"},
+                         cwd=self.repo)
+        out = out["hookSpecificOutput"]
+        self.assertEqual(out["hookEventName"], "SessionStart")
+        self.assertIn("feature", out["additionalContext"])
+
+    def test_unknown_harness_falls_back_to_claude(self):
+        self.activate()
+        out = self.hook("isolation", self.edit("/etc/passwd"), harness="bogus",
+                        env={"DEVIN_PROJECT_DIR": ""})
+        self.assertEqual(self.decision(out), "deny")
+
+    def test_explicit_harness_claude_unchanged(self):
+        self.activate()
+        out = self.hook("isolation", {"tool_name": "Write",
+                                      "tool_input": {"file_path": "/etc/passwd"}},
+                        harness="claude")
+        self.assertEqual(self.decision(out), "deny")
+        self.assertIn("hookSpecificOutput", out)
+
+
+class CodexHooks(HookCase):
+    """Codex CLI payloads: same Claude-compatible field names plus Codex
+    extensions (hook_event_name, model, permission_mode, tool_use_id, turn_id,
+    transcript_path). File edits arrive as tool_name "apply_patch" with the
+    raw patch in tool_input.command (*** Begin Patch / *** Update File: ...);
+    shell arrives as "Bash". Output is the same JSON shapes Claude uses:
+    hookSpecificOutput.permissionDecision on PreToolUse, flat
+    decision/reason on Stop, hookSpecificOutput.additionalContext on
+    SessionStart. Verified against codex-cli hooks docs (learn.chatgpt.com)."""
+
+    def codex(self, name, payload, **kw):
+        return self.hook(name, payload, harness="codex", **kw)
+
+    def pre(self, tool_name, tool_input, sid="s1", **extra):
+        payload = {"hook_event_name": "PreToolUse", "session_id": sid,
+                   "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                   "permission_mode": "default", "tool_name": tool_name,
+                   "tool_input": tool_input, "tool_use_id": "tu1",
+                   "turn_id": "t1", "transcript_path": None}
+        payload.update(extra)
+        return payload
+
+    def patch(self, *sections):
+        return "*** Begin Patch\n" + "".join(sections) + "*** End Patch"
+
+    def update(self, path, body="@@\n-old\n+new\n"):
+        return f"*** Update File: {path}\n{body}"
+
+    def test_apply_patch_outside_is_denied(self):
+        self.activate()
+        out = self.codex("isolation", self.pre(
+            "apply_patch", {"command": self.patch(self.update("/etc/passwd"))}))
+        self.assertEqual(self.decision(out), "deny")
+        self.assertIn("outside the run workspace",
+                      out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_apply_patch_inside_repo_and_run_dir_allowed(self):
+        self.activate()
+        for path in (str(self.repo / "a.py"), str(self.run_dir / "spec.md"),
+                     "sub/rel.py"):
+            out = self.codex("isolation", self.pre(
+                "apply_patch", {"command": self.patch(self.update(path))}))
+            self.assertIsNone(out, path)
+
+    def test_apply_patch_multi_file_any_outside_denies(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "ok.py")),
+                           self.update("/etc/evil.py"))
+        out = self.codex("isolation", self.pre("apply_patch",
+                                               {"command": patch}))
+        self.assertEqual(self.decision(out), "deny")
+        self.assertIn("evil.py",
+                      out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_apply_patch_add_delete_and_move_headers_checked(self):
+        self.activate()
+        patch = self.patch(
+            "*** Add File: /tmp/new.txt\n+hi\n",
+            "*** Delete File: /etc/gone.txt\n",
+            f"*** Update File: {self.repo}/moved.py\n@@\n-x\n"
+            "*** Move to: /etc/stolen.py\n")
+        out = self.codex("isolation", self.pre("apply_patch",
+                                               {"command": patch}))
+        self.assertEqual(self.decision(out), "deny")
+
+    def test_apply_patch_record_edit_stamps_each_path(self):
+        self.activate()
+        patch = self.patch(self.update(str(self.repo / "a.py")),
+                           self.update(str(self.run_dir / "notes.md")))
+        self.codex("record_edit",
+                   {"hook_event_name": "PostToolUse", "session_id": "s1",
+                    "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": patch},
+                    "tool_response": "Success.", "tool_use_id": "tu1"})
+        st = state.load(self.run_dir)
+        self.assertTrue(st["repos"]["api"]["last_edit_at"])
+        # run-dir artifacts are not code (R25): the run_dir path must not
+        # stamp the top-level last_edit_at
+        self.assertFalse(st["last_edit_at"])
+
+    def test_bash_tool_confirm_write_ops_unchanged(self):
+        self.activate()
+        out = self.codex("confirm_write_ops", self.pre(
+            "Bash", {"command": "git push origin main"}))
+        self.assertEqual(self.decision(out), "deny")
+        out = self.codex("confirm_write_ops", self.pre(
+            "Bash", {"command": "git status"}))
+        self.assertIsNone(out)
+
+    def test_stop_gate_blocks_in_codex_shape(self):
+        self.activate()
+        self.stamp(repo_edit=T3)
+        out = self.codex("completion_gate",
+                         {"hook_event_name": "Stop", "session_id": "s1",
+                          "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                          "permission_mode": "default",
+                          "stop_hook_active": False, "turn_id": "t1",
+                          "last_assistant_message": "done",
+                          "transcript_path": None})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("kinetic verify", out["reason"])
+
+    def test_orient_session_start_injects_context(self):
+        self.activate()
+        out = self.codex("orient",
+                         {"hook_event_name": "SessionStart", "session_id": "s1",
+                          "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                          "permission_mode": "default", "source": "startup",
+                          "transcript_path": None})
+        hso = out["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "SessionStart")
+        self.assertIn("feature", hso["additionalContext"])
+
+    def test_isolation_fail_closed_asks_on_apply_patch_garbage(self):
+        self.activate()
+        (self.run_dir / "state.json").write_text("{not json")
+        out = self.codex("isolation", self.pre(
+            "apply_patch", {"command": "not a patch at all"}))
+        self.assertEqual(self.decision(out), "ask")
+
+    def test_claim_run_via_bash_exec(self):
+        self.activate()
+        self.codex("claim_run",
+                   {"hook_event_name": "PostToolUse", "session_id": "s1",
+                    "cwd": str(self.repo), "model": "gpt-6.1-sol",
+                    "tool_name": "Bash",
+                    "tool_input": {"command":
+                                   "printf '%s' /r | tee "
+                                   "~/.config/kinetic/active-run"},
+                    "tool_response": "", "tool_use_id": "tu1"})
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
+
+
+class OpenCodeHooks(HookCase):
+    """Payloads as the generated OpenCode plugin forwards them: the raw
+    tool.execute.before/after event fields (sessionID, agent, messageID, id,
+    tool, input) plus kinetic_event and cwd. Tool inputs use OpenCode's own
+    spellings — edit/write carry "path", patch carries patchText, shell
+    carries "command"/"workdir". Pre-tool decisions render flat
+    {"decision","reason"} (deny -> the plugin throws, ask -> permission
+    evaluate); completion_gate keeps {"decision":"block"} and orient keeps
+    hookSpecificOutput.additionalContext, both mapped by the plugin."""
+
+    def oc(self, name, payload, **kw):
+        return self.hook(name, payload, harness="opencode", **kw)
+
+    def pre(self, tool, input_, sid="s1", **extra):
+        payload = {"kinetic_event": "PreToolUse", "cwd": str(self.repo),
+                   "sessionID": sid, "agent": "build", "messageID": "m1",
+                   "id": "call1", "tool": tool, "input": input_}
+        payload.update(extra)
+        return payload
+
+    def post(self, tool, input_, sid="s1", status="completed", **extra):
+        payload = {"kinetic_event": "PostToolUse", "cwd": str(self.repo),
+                   "sessionID": sid, "agent": "build", "messageID": "m1",
+                   "id": "call1", "tool": tool, "input": input_,
+                   "status": status}
+        payload.update(extra)
+        return payload
+
+    def patch(self, *sections):
+        return "*** Begin Patch\n" + "".join(sections) + "*** End Patch"
+
+    def update(self, path, body="@@\n-old\n+new\n"):
+        return f"*** Update File: {path}\n{body}"
+
+    def decision(self, out):
+        return out.get("decision") if out else None
+
+    def test_edit_outside_is_denied_in_opencode_shape(self):
+        self.activate()
+        out = self.oc("isolation", self.pre("edit", {"path": "/etc/passwd"}))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("outside the run workspace", out["reason"])
+        self.assertNotIn("hookSpecificOutput", out)
+
+    def test_write_and_relative_path_use_session_cwd(self):
+        self.activate()
+        self.assertIsNone(self.oc("isolation",
+                                  self.pre("write", {"path": "sub/a.py"})))
+        out = self.oc("isolation", self.pre("write", {"path": "a.py"},
+                                            cwd=str(self.home)))
+        self.assertEqual(out["decision"], "deny")
+
+    def test_patch_tool_extracts_file_paths(self):
+        self.activate()
+        out = self.oc("isolation", self.pre(
+            "patch", {"patchText": self.patch(self.update("/etc/evil.py"))}))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("evil.py", out["reason"])
+        # multi-file patch: any outside path denies
+        patch = self.patch(self.update(str(self.repo / "ok.py")),
+                           self.update("/etc/evil.py"))
+        out = self.oc("isolation", self.pre("patch", {"patchText": patch}))
+        self.assertEqual(out["decision"], "deny")
+        # a patch inside the workspace is allowed
+        patch = self.patch(self.update(str(self.repo / "a.py")))
+        self.assertIsNone(self.oc("isolation",
+                                  self.pre("patch", {"patchText": patch})))
+
+    def test_patch_unparseable_asks(self):
+        self.activate()
+        out = self.oc("isolation",
+                      self.pre("patch", {"patchText": "not a patch"}))
+        self.assertEqual(out["decision"], "ask")
+
+    def test_shell_maps_to_bash_for_confirm_write_ops(self):
+        self.activate()
+        out = self.oc("confirm_write_ops", self.pre(
+            "shell", {"command": "git push origin main"}))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIsNone(self.oc("confirm_write_ops", self.pre(
+            "shell", {"command": "git status"})))
+        # v1 spelled the shell tool "bash"; it maps the same way
+        out = self.oc("confirm_write_ops", self.pre(
+            "bash", {"command": "git push origin main"}))
+        self.assertEqual(out["decision"], "deny")
+
+    def test_mcp_namespaced_write_ops_ask(self):
+        self.activate()
+        for tool in ("github_create_pull_request",
+                     "atlassian_create_issue"):
+            out = self.oc("confirm_write_ops", self.pre(tool, {}))
+            self.assertEqual(out["decision"], "ask", tool)
+
+    def test_mcp_deploy_asks(self):
+        self.activate()
+        out = self.oc("confirm_deploy",
+                      self.pre("tekton_trigger_deploy", {}))
+        self.assertEqual(out["decision"], "ask")
+
+    def test_record_edit_stamps_repo_for_write_and_patch(self):
+        self.activate()
+        self.oc("record_edit", self.post(
+            "write", {"path": str(self.repo / "a.py")}))
+        self.assertTrue(state.load(self.run_dir)["repos"]["api"]["last_edit_at"])
+        self.oc("record_edit", self.post(
+            "patch", {"patchText": self.patch(
+                self.update(str(self.run_dir / "notes.md")))}))
+        st = state.load(self.run_dir)
+        self.assertTrue(st["repos"]["api"]["last_edit_at"])
+        # run-dir artifacts are not code (R25)
+        self.assertFalse(st["last_edit_at"])
+
+    def test_failed_edit_is_not_recorded(self):
+        self.activate()
+        self.oc("record_edit", self.post(
+            "write", {"path": str(self.repo / "a.py")}, status="error"))
+        self.assertFalse(state.load(self.run_dir)["repos"]["api"]
+                         .get("last_edit_at"))
+
+    def test_claim_run_via_shell(self):
+        self.activate()
+        self.oc("claim_run", self.post(
+            "shell", {"command": "printf '%s' /r | tee "
+                                "~/.config/kinetic/active-run"}))
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
+
+    def test_session_scope_uses_sessionID(self):
+        self.activate()
+        self.oc("claim_run", self.post(
+            "shell", {"command": "printf '%s' /r | tee "
+                                "~/.config/kinetic/active-run"}, sid="s1"))
+        # another session is out of scope unless its cwd is inside the run dir
+        self.assertIsNone(self.oc("isolation", self.pre(
+            "edit", {"path": "/etc/passwd"}, sid="s2", cwd=str(self.home))))
+        out = self.oc("isolation", self.pre(
+            "edit", {"path": "/etc/passwd"}, sid="s1"))
+        self.assertEqual(out["decision"], "deny")
+
+    def test_stop_gate_blocks_on_idle(self):
+        self.activate()
+        self.stamp(repo_edit=T3)
+        out = self.oc("completion_gate",
+                      {"kinetic_event": "Stop", "sessionID": "s1",
+                       "cwd": str(self.repo), "stop_hook_active": False})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("kinetic verify", out["reason"])
+
+    def test_orient_injects_context(self):
+        self.activate()
+        out = self.oc("orient", {"kinetic_event": "SessionStart",
+                                 "sessionID": "s1"})
+        hso = out["hookSpecificOutput"]
+        self.assertIn("feature", hso["additionalContext"])
+
+    def test_fail_closed_asks_in_opencode_shape(self):
+        self.activate()
+        (self.run_dir / "state.json").write_text("{not json")
+        out = self.oc("isolation", self.pre("edit", {"path": "/etc/passwd"}))
+        self.assertEqual(out["decision"], "ask")
+        self.assertIn("could not decide", out["reason"])
+
+    def test_garbage_input_asks(self):
+        out = self.oc("confirm_write_ops", "{bad")
+        self.assertEqual(out["decision"], "ask")
+
+
 class RecordEditAndOrient(HookCase):
     def test_record_edit_stamps_repo(self):
         self.activate()
@@ -394,6 +909,13 @@ class RecordEditAndOrient(HookCase):
         cmds = " ".join(h["command"] for ms in cfg.values() for m in ms for h in m["hooks"])
         for name in ("record_edit", "completion_gate", "isolation", "confirm_write_ops", "confirm_deploy", "orient"):
             self.assertIn(f"{name}.py", cmds)
+
+    def test_hooks_json_passes_harness_claude(self):
+        cfg = json.loads((HOOKS / "hooks.json").read_text())["hooks"]
+        cmds = [h["command"] for ms in cfg.values() for m in ms for h in m["hooks"]]
+        self.assertEqual(len(cmds), 7)
+        for c in cmds:
+            self.assertIn("--harness claude", c)
 
 
 if __name__ == "__main__":

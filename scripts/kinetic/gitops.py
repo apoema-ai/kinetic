@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -39,6 +40,44 @@ def merge_ticket(repo_path, ticket_branch: str, integration_branch: str) -> dict
     if not conflicts:
         raise RuntimeError(m.stderr.strip() or m.stdout.strip())
     return {"merged": False, "conflicts": conflicts}
+
+
+def status_hash(repo) -> str:
+    """Stable sha256 of the repo's working state: `git status --porcelain`,
+    `git diff HEAD` and the bytes of untracked files (gitignored files are not covered), so a content edit to an
+    already-dirty or untracked file changes it too."""
+    h = hashlib.sha256()
+    for args in (("status", "--porcelain"), ("diff", "HEAD")):
+        r = _git(repo, *args)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.strip() or f"cannot read git {args[0]} in {repo}")
+        h.update(r.stdout.encode("utf-8"))
+    r = _git(repo, "ls-files", "--others", "--exclude-standard")
+    for name in sorted(r.stdout.splitlines()):
+        h.update(name.encode("utf-8"))
+        try:
+            with open(Path(repo) / name, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+        except OSError:
+            h.update(b"<unreadable>")  # nested repo or no permission
+    return h.hexdigest()
+
+
+def assert_unchanged(repo, head: str, want_status_hash: str) -> dict:
+    """Compare the repo's current HEAD and porcelain status to the recorded ones."""
+    cur = _git(repo, "rev-parse", "HEAD")
+    if cur.returncode != 0 or not cur.stdout.strip():
+        raise RuntimeError(cur.stderr.strip() or f"cannot resolve HEAD in {repo}")
+    cur_head = cur.stdout.strip()
+    cur_hash = status_hash(repo)
+    changed = []
+    if cur_head != head:
+        changed.append("head")
+    if cur_hash != want_status_hash:
+        changed.append("status")
+    return {"ok": not changed, "changed": changed,
+            "head": cur_head, "status_hash": cur_hash}
 
 
 def _groups(tickets: dict) -> dict:
@@ -136,6 +175,12 @@ def main(argv=None) -> int:
     pn.add_argument("--run", required=True)
     pn.add_argument("--upstream", required=True)
     pn.add_argument("--downstream", required=True)
+    sh = sub.add_parser("status-hash")
+    sh.add_argument("--repo", required=True)
+    au = sub.add_parser("assert-unchanged")
+    au.add_argument("--repo", required=True)
+    au.add_argument("--head", required=True)
+    au.add_argument("--status-hash", required=True)
     a = p.parse_args(argv)
     try:
         if a.cmd == "worktree":
@@ -148,6 +193,11 @@ def main(argv=None) -> int:
             out, rc = {"order": merge_order(state.load(a.run))}, 0
         elif a.cmd == "ships-with":
             out, rc = {"groups": ships_with_groups(state.load(a.run))}, 0
+        elif a.cmd == "status-hash":
+            out, rc = {"status_hash": status_hash(Path(a.repo))}, 0
+        elif a.cmd == "assert-unchanged":
+            out = assert_unchanged(Path(a.repo), a.head, a.status_hash)
+            rc = 0 if out["ok"] else 1
         else:
             out = pin(a.run, a.upstream, a.downstream)
             rc = 0 if out["ok"] else 1

@@ -8,7 +8,7 @@ model: sonnet
 
 Write a PR body per repo integration branch, then open the set as **draft** PRs in merge order, wiring each PR's Depends on and Related PRs. This skill never invokes another skill and never dispatches a subagent: the orchestrator follows it inline.
 
-The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`). Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`. Repo paths, integration branches and tickets are in the run state (`python3 -m kinetic.state load --run <dir>`, fields `repos` and `tickets`); `base_branch` comes from repo config (default `main`); `tracker` comes from `~/.config/kinetic/settings.json`.
+The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`). Run scripts as `kinetic <module> ...`. Repo paths, integration branches and tickets are in the run state (`kinetic state load --run <dir>`, fields `repos` and `tickets`); `base_branch` comes from repo config (default `main`); `tracker` comes from `~/.config/kinetic/settings.json`.
 
 ## Rules
 
@@ -16,7 +16,7 @@ The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`
 - Open PRs only as drafts. Do not merge any PR, mark one ready, or deploy.
 - Never edit a PR that existed before this run.
 - Run git and gh against an explicit repo (`git -C <repo_path>`, or from the repo path); the shell's working directory is not kept between calls.
-- Write body files under `<dir>/pr/` with the Write tool, never `/tmp`: isolation denies writes outside the run directory.
+- Write body files under `<dir>/pr/`, never `/tmp`: isolation denies writes outside the run directory.
 - No AI attribution in commits or PR bodies. No emojis.
 - The push/PR confirmation hook may prompt; that is the expected gate. A hook denial is final: report it, do not retry another way.
 
@@ -25,12 +25,12 @@ The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`
 ### 1. Order and pre-flight
 
 ```
-python3 -m kinetic.gitops merge-order --run <dir>
+kinetic gitops merge-order --run <dir>
 ```
 
 It prints the ordered repo list, upstream first (and errors on a dependency cycle).
 
-Unmerged agent work: read the run state (`python3 -m kinetic.state load --run <dir>`) and list every agent ticket (missing `kind` means agent) whose status is not `merged` or `released`. This happens when the user said `ship` while human tickets were still open. If any exist, show the list to the user before going on: their work is not on the integration branch. In each affected repo's body they are a merge blocker in the WARNING alert ("Not yet merged into this branch: <ref> - <title>, ...") and are left out of Tickets.
+Unmerged agent work: read the run state (`kinetic state load --run <dir>`) and list every agent ticket (missing `kind` means agent) whose status is not `merged` or `released`. This happens when the user said `ship` while human tickets were still open. If any exist, show the list to the user before going on: their work is not on the integration branch. In each affected repo's body they are a merge blocker in the WARNING alert ("Not yet merged into this branch: <ref> - <title>, ...") and are left out of Tickets.
 
 For each repo, in that order:
 
@@ -98,18 +98,18 @@ Then the merge order with edge types (`api -> web (snapshot)`), every unverified
 
 ## PR body template
 
-Resolve the template with `python3 -m kinetic.tracker pr-template --repo <worktree>`. It prints `{"path": ...}`: the repo's `.kinetic.json` `pr_template`, else the `pr_template` in settings, else the plugin's `templates/pr-body.md`. A configured file that is missing is an error: show it and stop, never fall back silently. Read the file and replace each `<<NAME>>` with what fills it:
+Resolve the template with `kinetic tracker pr-template --repo <worktree>`. It prints `{"path": ...}`: the repo's `.kinetic.json` `pr_template`, else the `pr_template` in settings, else the plugin's `templates/pr-body.md`. A configured file that is missing is an error: show it and stop, never fall back silently. Read the file and replace each `<<NAME>>` with what fills it:
 
 | Placeholder | What fills it |
 |---|---|
-| `<<TICKETS>>` | One line per ticket merged into this repo, as `- <ref> - <title>`, linked. `<ref>` comes from the tracker adapter's "ticket reference" operation (`python3 -m kinetic.tracker resolve` names the adapter); the title is the ticket's, from `<dir>/issues/<id>.md`. |
+| `<<TICKETS>>` | One line per ticket merged into this repo, as `- <ref> - <title>`, linked. `<ref>` comes from the tracker adapter's "ticket reference" operation (`kinetic tracker resolve` names the adapter); the title is the ticket's, from `<dir>/issues/<id>.md`. |
 | `<<TITLE_KEY>>` | The slice reference from the same adapter operation, else the run id. Used in the title comment only. |
 | `<<DESCRIPTION>>` | 2-4 lines: what changes in this repo and why, in terms of behavior and responsibility. |
 | `<<DESIGN_DECISIONS>>` | A table: `\| Decision \| Why \|` header, then one row per decision, `<what was decided>` and `<why this over the alternative>`. |
 | `<<ARCHITECTURE>>` | A `text` fenced ASCII diagram of the implementation architecture, ending with the legend line `* = changed in this PR`. |
 | `<<ATTENTION_POINTS>>` | A `> [!WARNING]` alert with merge blockers and temporary pins (only if any), then bullets: `**Risk:**` (one-way or two-way door; blast radius narrow / moderate / wide), what a reviewer or deployer must know (ordering, migrations, flags, behavior changes), `**Evidence:**` (before vs after, plus the verify command and its result), `**Unverified / gaps:**`. |
 | `<<MANUAL_STEPS>>` | Each human ticket (`kind` human) that this repo's tickets are blocked by or related to, as `- <ref> - <title> (done by human: <note or link>)`; the note is the ticket's `human_note`. In a 0.2.0 state a missing `kind` means agent and a missing `human_note` means none. Only a not-yet-done human ticket this repo's tickets are blocked by (directly, via `blocked_by`) also goes into the WARNING alert as a merge blocker; one that is only related is listed here but is not a blocker. Ship still opens the drafts. |
-| `<<SHIPS_WITH>>` | `Merge together with: <org>/<repo>#<n>, ...`. Get the groups with `python3 -m kinetic.gitops ships-with --run <dir>` (prints `{"groups": {group: [repos]}}`); it returns repos, so map each other repo of this repo's group to the PR recorded for it. Filled in step 3 as PRs are created and completed in the step 4 backfill; PRs not yet created are omitted until then. Every PR in a group gets the same line, repeated in the WARNING alert. |
+| `<<SHIPS_WITH>>` | `Merge together with: <org>/<repo>#<n>, ...`. Get the groups with `kinetic gitops ships-with --run <dir>` (prints `{"groups": {group: [repos]}}`); it returns repos, so map each other repo of this repo's group to the PR recorded for it. Filled in step 3 as PRs are created and completed in the step 4 backfill; PRs not yet created are omitted until then. Every PR in a group gets the same line, repeated in the WARNING alert. |
 | `<<RELATED_PRS>>` | See "Depends on and Related PRs". |
 | `<<DEPENDS_ON>>` | See "Depends on and Related PRs". |
 
@@ -124,7 +124,7 @@ The section order is the template's, fixed so reviewers read every PR of a run t
 - **Manual steps and Ships with**: data the skill fills, never invented. A human ticket without a recorded note shows `(done by human)` alone; one not done is listed as open, and is also a merge blocker only when this repo's tickets are blocked by it (`blocked_by`); a related-only one is listed as open but is not a blocker.
 - **Design decisions**: where a responsibility was placed, sync vs async, new vs reused abstraction, contract or schema shape, backward compatibility, flag vs hard switch, failure isolation. Skip a decision with no real alternative; omit the subsection for a trivial change.
 - **Architecture (always included)**: a plain ASCII diagram in a `text` fence of the components this change touches, how they connect (calls, events, data reads) and the key methods or messages on the links. At most about 15 lines and 80 columns. Mark what this PR changes with `*` and keep the legend line. Show sibling repos where they sit on the other side of a link. For a flow, put its direction on the links rather than drawing a second diagram. For a small change, draw just the changed component and its neighbors. Every box and link must come from the diff or the repo; an inferred link goes under Unverified / gaps.
-- **Attention points**: the alert holds merge blockers only: a downstream repo pinned to an upstream snapshot (`kinetic.gitops pin`) that must move to a released version, an upstream PR that must merge first, a human ticket this repo's tickets are blocked by that is not done (from Manual steps), an agent ticket of this repo not yet merged into the branch (from pre-flight), and "Merge together with: ..." (from Ships with). Risk: a two-way door can be walked back, a one-way door (destructive or hard to reverse) cannot; the blast radius is the scope of impact, such as consumer breakage or a pinned downstream repo. Evidence comes from the run's `verify` records and logs: the command, exit code and test counts as recorded, and the failing-then-passing test where the tickets show one. Never invent counts. Other bullets only when they change how someone reviews, merges or deploys: migrations and rollback, deploy ordering, incompatible contract changes, new config or flags and their defaults, behavior differences between environments.
+- **Attention points**: the alert holds merge blockers only: a downstream repo pinned to an upstream snapshot (`kinetic gitops pin`) that must move to a released version, an upstream PR that must merge first, a human ticket this repo's tickets are blocked by that is not done (from Manual steps), an agent ticket of this repo not yet merged into the branch (from pre-flight), and "Merge together with: ..." (from Ships with). Risk: a two-way door can be walked back, a one-way door (destructive or hard to reverse) cannot; the blast radius is the scope of impact, such as consumer breakage or a pinned downstream repo. Evidence comes from the run's `verify` records and logs: the command, exit code and test counts as recorded, and the failing-then-passing test where the tickets show one. Never invent counts. Other bullets only when they change how someone reviews, merges or deploys: migrations and rollback, deploy ordering, incompatible contract changes, new config or flags and their defaults, behavior differences between environments.
 - About 40 lines or fewer excluding the diagram. Bullets over paragraphs. Drop any section that ends up empty; never leave a blank heading.
 - GitHub markdown for readability, not decoration: tables for decisions and related PRs, the alert for merge blockers only, task lists for dependencies, `<org>/<repo>#<n>` shorthand so links autolink, backticks for identifiers. Long evidence goes in `<details><summary>...</summary>`. No headings deeper than `####`.
 - No CI directive lines (such as `+dep-pr` or `+deploy`); Depends on and the merge order carry the dependency.

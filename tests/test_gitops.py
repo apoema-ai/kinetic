@@ -160,6 +160,65 @@ class MergeOrderTests(unittest.TestCase):
         self.assertEqual(json.loads(buf.getvalue()), {"groups": {"g": ["a", "z"]}})
 
 
+class AssertUnchangedTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name) / "r"
+        make_repo(self.repo)
+        self.head = git(self.repo, "rev-parse", "HEAD")
+        self.hash = gitops.status_hash(self.repo)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _assert(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gitops.main(["assert-unchanged", "--repo", str(self.repo),
+                              "--head", self.head, "--status-hash", self.hash])
+        return rc, json.loads(buf.getvalue())
+
+    def test_content_edit_to_untracked_file_detected(self):
+        f = self.repo / "new.txt"
+        f.write_text("a")
+        h = gitops.status_hash(self.repo)
+        f.write_text("b")
+        self.assertNotEqual(gitops.status_hash(self.repo), h)
+
+    def test_clean_worktree_passes(self):
+        rc, out = self._assert()
+        self.assertEqual(rc, 0)
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["changed"], [])
+
+    def test_new_commit_fails(self):
+        commit_file(self.repo, "b.txt", "b\n", "add b")
+        rc, out = self._assert()
+        self.assertEqual(rc, 1)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["changed"], ["head"])
+
+    def test_dirty_tree_fails(self):
+        (self.repo / "dirty.txt").write_text("x\n")
+        rc, out = self._assert()
+        self.assertEqual(rc, 1)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["changed"], ["status"])
+
+    def test_status_hash_cli(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = gitops.main(["status-hash", "--repo", str(self.repo)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue())["status_hash"], self.hash)
+        (self.repo / "dirty.txt").write_text("x\n")
+        self.assertNotEqual(gitops.status_hash(self.repo), self.hash)
+
+
 class PinTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

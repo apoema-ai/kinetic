@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 import os
+import shlex
 import sys
 import tempfile
 import uuid
@@ -85,10 +86,89 @@ def init(run_dir, lane: str, ref: str, force: bool = False) -> dict:
     return state
 
 
+OCCUPIED = ("running", "needs_decision", "blocked")
+
+
+def _verify_fresh(v, stamp) -> bool:
+    """A verify record counts as fresh when it passed after stamp."""
+    return bool(v) and (v.get("at") or "") > stamp and v.get("exit_code") == 0
+
+
+def stale_verify(state: dict) -> list:
+    """Repos whose verify is stale, by the same rule the stop gate uses:
+    a repo edited after its newest verify record (or with no passing verify
+    at all), skipping repos with occupied tickets. Also reports top-level
+    edits outside every registered repo. Returns a list of
+    {"repo", "path", "ticket"} dicts; repo/path/ticket are None for the
+    outside-repos entry."""
+    verifies = list(state.get("verify", {}).values())
+    bad = []
+    for name, repo in state.get("repos", {}).items():
+        stamp = repo.get("last_edit_at")
+        if not stamp or any(t.get("repo") == name and t.get("status") in OCCUPIED
+                            for t in state.get("tickets", {}).values()):
+            continue
+        newest = max((v for v in verifies if v.get("repo") == name),
+                     key=lambda v: v.get("at") or "", default=None)
+        if not _verify_fresh(newest, stamp):
+            tid = repo.get("last_edit_ticket")
+            wt = state.get("tickets", {}).get(tid, {}).get("worktree") \
+                if tid else None
+            bad.append({"repo": name, "path": wt or repo.get("path"),
+                        "ticket": tid if wt else None})
+    top = state.get("last_edit_at")
+    newest_all = max(verifies, key=lambda v: v.get("at") or "", default=None)
+    if top and not _verify_fresh(newest_all, top):
+        bad.append({"repo": None, "path": None, "ticket": None})
+    return bad
+
+
+def verify_command(run_dir, repo: str, path: str, ticket=None) -> str:
+    """The `kinetic verify` remediation command for one stale_verify entry;
+    shared by ship_refusal and the completion_gate Stop hook so both name
+    the same command."""
+    cmd = (f"kinetic verify --run {shlex.quote(str(run_dir))} "
+           f"--repo-name {shlex.quote(repo)} "
+           f"--repo-path {shlex.quote(path)}")
+    if ticket:
+        cmd += f" --ticket {shlex.quote(ticket)}"
+    return cmd
+
+
+def ship_refusal(state: dict, run_dir) -> str | None:
+    """Why the run may not enter or approve the ship phase: verify is stale.
+    Returns a remediation message or None. This is the CLI-level half of the
+    verify-before-stop guarantee — harnesses without a Stop-block hook
+    (OpenCode) rely on it, and it holds everywhere."""
+    bad = stale_verify(state)
+    if not bad:
+        return None
+    lines = []
+    for b in bad:
+        if b["repo"] is None:
+            lines.append("edits outside registered repos: run verify for "
+                         "the repo you edited")
+        elif b["path"]:
+            lines.append(verify_command(run_dir, b["repo"], b["path"],
+                                        b["ticket"]))
+        else:
+            lines.append(f"{b['repo']}: run verify for the repo you edited")
+    return ("verify is stale: no passing verify after the last edit. "
+            + "; ".join(lines))
+
+
 def set_phase(run_dir, phase: str) -> dict:
     if phase not in PHASES:
         raise ValueError(f"invalid phase '{phase}': expected one of {PHASES}")
-    return _mutate(run_dir, lambda s: s.update(phase=phase))
+
+    def fn(s):
+        if phase == "ship":
+            reason = ship_refusal(s, run_dir)
+            if reason:
+                raise ValueError(reason)
+        s.update(phase=phase)
+
+    return _mutate(run_dir, fn)
 
 
 def set_slices(run_dir, slices: list) -> dict:
@@ -238,8 +318,15 @@ def record_edit(run_dir, path: str) -> None:
 
 
 def record_gate(run_dir, gate: str, approved: bool, note: str = "") -> None:
-    _mutate(run_dir, lambda s: s["gates"].__setitem__(
-        gate, {"approved": approved, "note": note, "at": _now()}))
+    def fn(s):
+        if gate == "ship" and approved:
+            reason = ship_refusal(s, run_dir)
+            if reason:
+                raise ValueError(reason)
+        s["gates"].__setitem__(
+            gate, {"approved": approved, "note": note, "at": _now()})
+
+    _mutate(run_dir, fn)
 
 
 def add_ruling(run_dir, what: str, why: str, cost: str) -> None:

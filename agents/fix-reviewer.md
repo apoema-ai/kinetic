@@ -2,6 +2,7 @@
 name: fix-reviewer
 description: Read-only scoped re-review of one kinetic fix round. Verdicts each earlier review finding and checks only the fix diff for new breakage. Dispatched only by /kinetic:run.
 model: sonnet
+tier: standard
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -21,7 +22,7 @@ A full review of this ticket already happened. An implementer has tried to fix i
 
 ## Read-only
 
-Bash is for `git diff`, `git log` and `git show` only. Do not run builds, tests, installs or anything that writes. Do not edit source. You have no Write tool and write no files.
+Shell commands are for `git diff`, `git log` and `git show` only. Do not run builds, tests, installs or anything that writes. Do not edit source and write no files.
 
 ## What to check
 
@@ -51,4 +52,4 @@ Severity is Critical, Important or Minor. End with exactly one line: `Verdict: A
 
 ## You do not dispatch subagents
 
-You never use the Agent or Task tool and never ask another agent to review for you. Only `/kinetic:run` dispatches agents. Do all the work yourself.
+You never dispatch a subagent and never ask another agent to review for you. Only `/kinetic:run` dispatches agents. Do all the work yourself.

@@ -1,6 +1,6 @@
 # kinetic
 
-kinetic is a Claude Code plugin that drives a software change from idea to draft PRs across one or more repositories: grill the idea, write a spec, split it into tickets with typed dependency edges, build each ticket with an isolated implementer, review, ship, and run a retro.
+kinetic is a plugin that drives a software change from idea to draft PRs across one or more repositories: grill the idea, write a spec, split it into tickets with typed dependency edges, build each ticket with an isolated implementer, review, ship, and run a retro. It runs inside Claude Code and Devin CLI (Codex CLI and OpenCode support is in progress).
 
 The split of work is deliberate:
 
@@ -40,13 +40,38 @@ It merges ideas from three plugins: Matt Pocock's skills (grill, spec, tickets, 
 
 Requirements: macOS or Linux, Python 3.9+, `git`, and `gh` authenticated to GitHub. Jira mode also needs the Atlassian MCP server; GitHub issues mode needs `gh` with issue access; Linear mode needs a Linear MCP server.
 
-For local use, point Claude Code at a checkout:
+For local use, install from a checkout. Claude Code:
 
 ```
+<path-to-kinetic>/bin/kinetic install --harness claude
 claude --plugin-dir <path-to-kinetic>
 ```
 
-Optional companions that kinetic uses when present and falls back without: the `find-ticket-repos`, `checkout-ticket-repos` and `resolving-merge-conflicts` skills under `~/.claude/skills`, and the `superpowers` and `dev-fleet` plugins (for `receiving-code-review`, `architecture-review` and `release`). `/kinetic:doctor` reports which are missing.
+Devin CLI:
+
+```
+<path-to-kinetic>/bin/kinetic install --harness devin
+```
+
+Codex CLI:
+
+```
+<path-to-kinetic>/bin/kinetic install --harness codex
+```
+
+OpenCode:
+
+```
+<path-to-kinetic>/bin/kinetic install --harness opencode
+```
+
+`kinetic install` links `kinetic` onto your PATH (`~/.local/bin` — make sure that directory is on your PATH), records the harness and clone in `~/.config/kinetic/settings.json`, and writes an install manifest that `doctor` checks for staleness. Re-run it after `git pull`; `kinetic install --harness <h> --uninstall` removes everything it wrote. On Claude Code, plugin registration itself (`claude --plugin-dir`) stays manual; on Devin CLI the installer runs `devin plugins install --local <clone>` itself (skills appear as `/kinetic:<name>`) and writes Devin-format hooks into `~/.config/devin/config.json`, preserving any foreign entries. Devin support is unverified until the manual checklist in `docs/smoke/devin.md` has been run (it also settles whether Devin double-registers the clone's `hooks/hooks.json`).
+
+On Codex CLI the installer is file generation only: it writes `kntc-<name>` stub skills under `~/.agents/skills` (user-only skills get an `agents/openai.yaml` sidecar with `policy.allow_implicit_invocation: false`), agent definitions under `~/.codex/agents/*.toml` with the tier resolved to `model`/`model_reasoning_effort` (override via `tiers.codex` in `settings.json`), and merges kinetic's hooks into `~/.codex/hooks.json`, preserving foreign entries. Codex gates hooks behind interactive trust: after install, open Codex and run `/hooks` to review and trust kinetic's hooks — they stay inactive until trusted, and `kinetic doctor` fails its `hooks-trusted` check until the `trusted_hash` state matches. Codex support is validated by the manual checklist in `docs/smoke/codex.md`. Known Codex limitations: per-agent tool allow-lists are not honoured (the `tools:` frontmatter has no Codex agent equivalent), and the write-op/deploy confirmation hooks only fire on tool names matching `mcp__.*` patterns — verify MCP tool naming during the smoke run.
+
+On OpenCode the installer is also file generation only: it writes flat `kntc-<name>.md` stub skills under `~/.config/opencode/skills` (user-only skills carry `disable-model-invocation: true`, which OpenCode honours natively), markdown agents under `~/.config/opencode/agents/*.md` with `mode: subagent`, the tier resolved to `model` (override via `tiers.opencode` in `settings.json`), and `permissions` deny rules translated from each agent's `tools:` allow-list, and drops a dependency-free TypeScript plugin at `~/.config/opencode/plugins/kinetic.ts` that forwards tool/session events to the Python hooks — deny by throwing in `tool.execute.before`, ask via `permission.evaluate`, edit recording via `execute.after`, orientation via the session `context` hook, and a bounded verify re-prompt on `experimental.idle`. OpenCode file-drops plugins: no `opencode.json` edit and no trust step. OpenCode support is validated by the manual checklist in `docs/smoke/opencode.md`; known limitations: the idle re-prompt is best-effort (the `experimental.idle` API is experimental and bounded to three rounds per session), so `verify-before-stop` stays Instructed there while `verify`/`ship` refusing stale verify is Enforced at the CLI layer on every harness.
+
+Optional companions that kinetic uses when present and falls back without: the `find-ticket-repos`, `checkout-ticket-repos` and `resolving-merge-conflicts` skills and the `superpowers` and `dev-fleet` plugins, installed wherever the harness keeps skills and plugins (`~/.claude/skills` and `~/.claude/plugins` on Claude Code; `~/.config/devin/skills` or `~/.agents/skills` and `devin plugins install` on Devin CLI). `/kinetic:doctor` reports which are missing.
 
 ## Quick start
 
@@ -296,7 +321,7 @@ To rename any of these for your workspace, override them in `settings.json`:
 }
 ```
 
-`tracker_names` is merged key by key over the adapter's defaults; a missing role is an error. The top-level `jira_project`, `slice_issue_type` and `child_issue_type` keys from 0.2.0 are still read. `python3 -m kinetic.tracker resolve` prints what kinetic resolved. kinetic state stays authoritative: remote trackers are written to, never read back.
+`tracker_names` is merged key by key over the adapter's defaults; a missing role is an error. The top-level `jira_project`, `slice_issue_type` and `child_issue_type` keys from 0.2.0 are still read. `kinetic tracker resolve` prints what kinetic resolved. kinetic state stays authoritative: remote trackers are written to, never read back.
 
 ## Human tickets
 
@@ -304,7 +329,7 @@ Some steps only a person can do: request a credential, flip a flag in a console,
 
 - **Waiting on you.** `/kinetic:status` and the board list human tickets whose blockers are satisfied under "Waiting on you".
 - **Only human work left.** When nothing is ready or running, agent tickets remain un-merged, and every remaining ticket is human or behind a human ticket you can act on, the run pauses and says so instead of reporting a stall; say `ship` to continue with those human tickets open; ship then lists the agent tickets still behind them as not merged and makes them merge blockers. The build loop ends once every agent ticket is merged, so human tickets still open then are carried into review and ship as open items.
-- **`human-done`.** `python3 -m kinetic.state human-done --run <run_dir> --id <id> [--note "..."]` marks it done. `set-ticket` refuses `done` on a human ticket. An edge onto a human blocker is satisfied when it is `done`, whatever its edge type.
+- **`human-done`.** `kinetic state human-done --run <run_dir> --id <id> [--note "..."]` marks it done. `set-ticket` refuses `done` on a human ticket. An edge onto a human blocker is satisfied when it is `done`, whatever its edge type.
 - **`NEEDS_HUMAN`.** An implementer that hits a step only a person can do reports `NEEDS_HUMAN`. kinetic creates a new human ticket, blocks the original on it and parks the original until you finish it. The original keeps its repo and worktree.
 - **Ship.** Ship still opens draft PRs while a human ticket is open; open human tickets that block a repo's tickets appear as a merge blocker under Attention points and in Manual steps.
 
@@ -318,19 +343,19 @@ Besides `blocked_by` (with the `snapshot`, `merge` and `release` edge types), ti
 | `ships_with` | A group name shared by tickets that must be released together | Merge order puts the group's repos next to each other when blockers allow; PR bodies get a "Ships with" section |
 | `related` | Context only | Listed in the ticket; a related human ticket also appears in the PR's Manual steps |
 
-`graph validate` reports unknown `after` or `related` ids, an `after` that contradicts a `blocked_by`, and a `ships_with` group of one ticket. `python3 -m kinetic.gitops ships-with --run <run_dir>` prints the groups by repo. Tickets written by 0.2.0 need no migration: missing fields default to `kind` agent and empty relationships.
+`graph validate` reports unknown `after` or `related` ids, an `after` that contradicts a `blocked_by`, and a `ships_with` group of one ticket. `kinetic gitops ships-with --run <run_dir>` prints the groups by repo. Tickets written by 0.2.0 need no migration: missing fields default to `kind` agent and empty relationships.
 
 ## The local board and drift
 
 In local mode tickets are markdown files under `<run_dir>/issues/`, and `issues/README.md` is a board: "Waiting on you" first, then every ticket with its kind, status and blockers. kinetic state is the source of truth; the files are a view of it.
 
-- `python3 -m kinetic.board header --run <run_dir> --id <id>` writes a ticket file's header (Status, Type, Repo, Slice, Blocked by, After, Ships with, Related, Assignee). Comments below the header are kept. Assignee is derived (human: the user, agent: the implementer), not stored.
-- `python3 -m kinetic.board render --run <run_dir>` rewrites the board.
-- `python3 -m kinetic.board drift --run <run_dir>` lists files that disagree with state. A file written by hand shows drift until its first `header`. If you mark a human ticket done by editing its file, kinetic sees the drift and asks before applying it.
+- `kinetic board header --run <run_dir> --id <id>` writes a ticket file's header (Status, Type, Repo, Slice, Blocked by, After, Ships with, Related, Assignee). Comments below the header are kept. Assignee is derived (human: the user, agent: the implementer), not stored.
+- `kinetic board render --run <run_dir>` rewrites the board.
+- `kinetic board drift --run <run_dir>` lists files that disagree with state. A file written by hand shows drift until its first `header`. If you mark a human ticket done by editing its file, kinetic sees the drift and asks before applying it.
 
 ## The PR template override
 
-Ship fills one template for every PR. The default is `templates/pr-body.md`. To use your own, set `pr_template` to a file path, in `settings.json` for every repo or in a repo-root `.kinetic.json` for one repo. The first of repo `.kinetic.json`, `settings.json` and the plugin default wins; a relative path resolves against the directory of the file that set it, and a configured file that is missing is an error. `python3 -m kinetic.tracker pr-template --repo <path>` prints the path used. Placeholders are `<<TITLE_KEY>>`, `<<TICKETS>>`, `<<DESCRIPTION>>`, `<<DESIGN_DECISIONS>>`, `<<ARCHITECTURE>>`, `<<ATTENTION_POINTS>>`, `<<MANUAL_STEPS>>`, `<<SHIPS_WITH>>`, `<<RELATED_PRS>>` and `<<DEPENDS_ON>>`; the filled placeholders are kept in `<run_dir>/pr/<repo>.placeholders.md` for the backfill once all PRs exist.
+Ship fills one template for every PR. The default is `templates/pr-body.md`. To use your own, set `pr_template` to a file path, in `settings.json` for every repo or in a repo-root `.kinetic.json` for one repo. The first of repo `.kinetic.json`, `settings.json` and the plugin default wins; a relative path resolves against the directory of the file that set it, and a configured file that is missing is an error. `kinetic tracker pr-template --repo <path>` prints the path used. Placeholders are `<<TITLE_KEY>>`, `<<TICKETS>>`, `<<DESCRIPTION>>`, `<<DESIGN_DECISIONS>>`, `<<ARCHITECTURE>>`, `<<ATTENTION_POINTS>>`, `<<MANUAL_STEPS>>`, `<<SHIPS_WITH>>`, `<<RELATED_PRS>>` and `<<DEPENDS_ON>>`; the filled placeholders are kept in `<run_dir>/pr/<repo>.placeholders.md` for the backfill once all PRs exist.
 
 ## Commands
 
@@ -426,7 +451,7 @@ The 0.2.0 top-level `jira_project`, `slice_issue_type` and `child_issue_type` ke
 ~/.config/kinetic/active-run   absolute path of the active run dir; absent means no run
 ```
 
-`python3 -m kinetic.state load --run <run_dir>` prints the whole state: lane, phase, tickets, slices, repos, gates, rulings, verify results and the owning session.
+`kinetic state load --run <run_dir>` prints the whole state: lane, phase, tickets, slices, repos, gates, rulings, verify results and the owning session.
 
 ## What the hooks enforce
 
@@ -446,15 +471,23 @@ The run-scoped hooks (isolation, record_edit, completion_gate) act only in the s
 
 - **Resume after a crash or in a new session.** Run `/kinetic:run` again. It finds the active run, rewrites the pointer (which claims the run for the new session), and resumes at the recorded phase. Recorded gates stay approved. For a ticket still `running` with no report, kinetic shows what its worktree holds and asks whether to re-dispatch an implementer there or set it back to `todo`.
 - **A crash during a fix round.** Recovery cannot yet tell a dead fix agent from a finished first round; check the report's latest `## Fix round` section and `<run_dir>/reviews/<id>-fix-N.md` by hand.
-- **`set-ticket` refuses `done`.** The ticket has no passing verify newer than its last edit. Re-run verify in its worktree (`python3 -m kinetic.verify --run <run_dir> --repo-name <repo> --repo-path <worktree> --ticket <id>`) or resume the implementer.
+- **`set-ticket` refuses `done`.** The ticket has no passing verify newer than its last edit. Re-run verify in its worktree (`kinetic verify --run <run_dir> --repo-name <repo> --repo-path <worktree> --ticket <id>`) or resume the implementer.
 - **Clean up after merge.** The retro offers to remove ticket and integration worktrees and branches whose PRs merged, listing them and asking first. It never force-removes and never deletes the run directory.
 - **Abandon a run.** `rm -f ~/.config/kinetic/active-run`. The run directory stays for reference.
 - **A hook denied something.** A denial is final for that action. Read the reason: an isolation denial names the allowed roots; a push denial means the target is a protected branch.
 - **`/kinetic:init` is denied writing config.** You are in the session that owns the active run; run it from another session.
-- **The run is stalled.** The frontier is empty with tickets still `todo`. kinetic shows the waiting edges; usually a `snapshot` edge between repos without `publish_snapshot`/`pin`, or a `release` edge nobody has marked. Mark a release with `python3 -m kinetic.state set-ticket --run <run_dir> --id <upstream-id> --field status=released`.
+- **The run is stalled.** The frontier is empty with tickets still `todo`. kinetic shows the waiting edges; usually a `snapshot` edge between repos without `publish_snapshot`/`pin`, or a `release` edge nobody has marked. Mark a release with `kinetic state set-ticket --run <run_dir> --id <upstream-id> --field status=released`.
 - **Doctor checks:** `git` and `gh` on PATH, `gh auth status`, a readable `repos.json`, a resolvable verify command per repo, the optional companion skills and plugins, and a reminder to check the Atlassian MCP with `/mcp`.
 
-Run scripts directly with `PYTHONPATH=<kinetic>/scripts python3 -m kinetic.<module> ...`.
+**Upgrading an existing Claude Code install:** skills, agents and hooks now call `kinetic ...` instead of `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/scripts python3 -m kinetic.*`. After updating, run `<clone>/bin/kinetic install --harness claude` once; until then `doctor` warns and skills fall back to `python3 <plugin-root>/bin/kinetic`.
+
+**OpenCode:** the plugin asks for confirmation on every edit or shell call when `python3` is missing or a kinetic hook crashes, rather than allowing it.
+
+**Reviewer read-only check:** the hash covers tracked diffs and untracked files; gitignored files are not covered.
+
+**Stale-verify guard:** on every harness (Claude included), `set-phase ship` and an approved ship gate are refused while a repo's verify is stale — this is intentional.
+
+Run kinetic commands as `kinetic <module> ...` once installed (`kinetic root` prints the clone root). From a checkout without installing, `PYTHONPATH=<kinetic>/scripts python3 -m kinetic.<module> ...` still works.
 
 ## Code layout
 
@@ -476,7 +509,7 @@ docs/                        comparison, design spec, implementation plan, rulin
 | `state.py` | Run state: init, phase, slices, tickets, repos, gates, rulings, verify and edit stamps, owner session; flock-guarded atomic writes; CLI (whose `set-ticket` refuses `done` without a passing, current verify) |
 | `graph.py` | Validates the ticket graph (missing repo except on human tickets, edge types, unknown blockers, unused slices, cycles, consumers without an edge to their producer, unknown or contradicting `after`/`related`, lone `ships_with` groups; unproduced interfaces as warnings) and gives a topological order that honours `after` |
 | `frontier.py` | Ready tickets (never human): satisfied blockers, the cap of 3 running, one per repo; `waiting_on_you` and `only_human_left` for human tickets |
-| `gitops.py` | `worktree`, `merge` (ticket into integration), `merge-order` across repos (ships-with neighbours kept together), `ships-with` groups, `pin` downstream repos to a snapshot |
+| `gitops.py` | `worktree`, `merge` (ticket into integration), `merge-order` across repos (ships-with neighbours kept together), `ships-with` groups, `pin` downstream repos to a snapshot, `status-hash` and `assert-unchanged` (reviewer read-only check) |
 | `verify.py` | Runs a repo's verify command, logs it and records the result in state |
 | `config.py` | Resolves a repo's config from `repos.json` and `.kinetic.json` |
 | `detect_repos.py` | Proposes a verify command from build markers (Maven, Gradle, npm, Go, Cargo, pyproject, Makefile) |
@@ -501,7 +534,7 @@ kinetic is at 0.3.1 (see `.claude-plugin/plugin.json`); 0.3.0 adds trackers, hum
 
 Not yet verified in a live session:
 
-- that `${CLAUDE_PLUGIN_ROOT}` expands where the skills use it;
+- that `kinetic` is on PATH wherever skills and agents run it;
 - that `skills: [tdd]` resolves to kinetic's own `tdd` skill;
 - whether subagent hook payloads carry the parent session id (the cwd rule covers implementers either way);
 - the Jira, GitHub and Linear adapters against the real services: they are untested live, including whether the installed `gh` supports sub-issues and "blocked by" and which relation tools the Linear MCP exposes (the adapters have fallbacks, but no test checks them).
