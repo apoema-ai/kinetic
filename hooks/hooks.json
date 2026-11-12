@@ -2,25 +2,25 @@
   "hooks": {
     "PostToolUse": [
       {"matcher": "Write|Edit|MultiEdit|NotebookEdit",
-       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/record_edit.py\"", "timeout": 10}]},
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/record_edit.py\" --harness claude", "timeout": 10}]},
       {"matcher": "Bash",
-       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/claim_run.py\"", "timeout": 10}]}
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/claim_run.py\" --harness claude", "timeout": 10}]}
     ],
     "Stop": [
       {"matcher": "",
-       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/completion_gate.py\"", "timeout": 10}]}
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/completion_gate.py\" --harness claude", "timeout": 10}]}
     ],
     "PreToolUse": [
       {"matcher": "Write|Edit|MultiEdit|NotebookEdit",
-       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/isolation.py\"", "timeout": 10}]},
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/isolation.py\" --harness claude", "timeout": 10}]},
       {"matcher": "Bash|mcp__.*atlassian.*(create|edit|Edit|update|transition|[Cc]omment|executeWrite|executeDestructive).*|mcp__.*github.*(create_pull_request|merge_pull_request|update_pull_request|push_files|create_or_update_file|create_branch|delete_file).*",
-       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/confirm_write_ops.py\"", "timeout": 10}]},
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/confirm_write_ops.py\" --harness claude", "timeout": 10}]},
       {"matcher": "mcp__.*deploy.*|mcp__.*tekton.*trigger.*",
-       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/confirm_deploy.py\"", "timeout": 10}]}
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/confirm_deploy.py\" --harness claude", "timeout": 10}]}
     ],
     "SessionStart": [
       {"matcher": "",
-       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/orient.py\"", "timeout": 10}]}
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/orient.py\" --harness claude", "timeout": 10}]}
     ]
   }
 }
