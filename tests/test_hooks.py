@@ -35,10 +35,17 @@ class HookCase(unittest.TestCase):
         ptr.mkdir(parents=True)
         (ptr / "active-run").write_text(str(self.run_dir))
 
-    def hook(self, name, payload):
-        env = dict(os.environ, HOME=str(self.home))
-        p = subprocess.run([sys.executable, str(HOOKS / f"{name}.py")], input=json.dumps(payload),
-                           capture_output=True, text=True, env=env)
+    def hook(self, name, payload, harness=None, env=None):
+        """Run a hook as a subprocess. payload is a dict (JSON-encoded) or a raw
+        stdin string; harness adds --harness <id>; env merges extra variables
+        (e.g. DEVIN_PROJECT_DIR) over HOME=temp-home."""
+        argv = [sys.executable, str(HOOKS / f"{name}.py")]
+        if harness:
+            argv += ["--harness", harness]
+        merged = dict(os.environ, HOME=str(self.home))
+        merged.update(env or {})
+        data = payload if isinstance(payload, str) else json.dumps(payload)
+        p = subprocess.run(argv, input=data, capture_output=True, text=True, env=merged)
         self.assertEqual(p.returncode, 0, p.stderr)
         return json.loads(p.stdout) if p.stdout.strip() else None
 
@@ -348,6 +355,148 @@ class Confirm(HookCase):
         self.assertEqual(json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
 
 
+class DevinHooks(HookCase):
+    """Devin CLI payloads as documented at docs.devin.ai/cli/extensibility/hooks:
+    hook_event_name/prompt_id extras, session_id, no cwd (DEVIN_PROJECT_DIR env
+    carries the project root), tool names exec/edit/write. Devin's PreToolUse
+    output is a top-level {"decision": "block"|"approve", "reason"}; it has no
+    "ask", so ask renders as the Claude-format hookSpecificOutput and Devin's
+    own permission flow remains the prompt."""
+
+    def devin(self, name, payload, cwd=None, **kw):
+        # Always set DEVIN_PROJECT_DIR ("" when absent) so a value leaking in
+        # from the developer's environment cannot change the result.
+        env = {"DEVIN_PROJECT_DIR": str(cwd) if cwd is not None else ""}
+        return self.hook(name, payload, harness="devin", env=env, **kw)
+
+    def edit(self, path, **extra):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "edit",
+                   "tool_input": {"file_path": path},
+                   "session_id": "s1", "prompt_id": "p1"}
+        payload.update(extra)
+        return payload
+
+    def exec_tool(self, cmd, sid="s1"):
+        return {"hook_event_name": "PreToolUse", "tool_name": "exec",
+                "tool_input": {"command": cmd, "shell_id": "main"},
+                "session_id": sid, "prompt_id": "p1"}
+
+    def test_isolation_denies_outside_in_devin_shape(self):
+        self.activate()
+        out = self.devin("isolation", self.edit("/etc/passwd"), cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("outside the run workspace", out["reason"])
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_isolation_allows_repo_and_project_dir_supplies_cwd(self):
+        self.activate()
+        self.assertIsNone(self.devin("isolation",
+                                     self.edit(str(self.repo / "a.py")), cwd=self.repo))
+        # relative path resolves against DEVIN_PROJECT_DIR, not the hook's cwd
+        self.assertIsNone(self.devin("isolation", self.edit("sub/a.py"), cwd=self.repo))
+        # without DEVIN_PROJECT_DIR a relative path falls back to os.getcwd()
+        out = self.devin("isolation", self.edit("sub/a.py"))
+        self.assertEqual(out["decision"], "block")
+
+    def test_isolation_reads_path_alias(self):
+        self.activate()
+        p = self.edit("/etc/passwd")
+        p["tool_input"] = {"path": "/etc/passwd"}
+        out = self.devin("isolation", p, cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+
+    def test_exec_git_push_to_protected_branch_denied(self):
+        self.activate()
+        out = self.devin("confirm_write_ops", self.exec_tool("git push origin main"),
+                         cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("protected branch", out["reason"])
+
+    def test_exec_push_asks_without_top_level_decision(self):
+        self.activate()
+        out = self.devin("confirm_write_ops", self.exec_tool("git push origin feature"),
+                         cwd=self.repo)
+        self.assertIsNone(out.get("decision"))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertIn("confirm with the user", out["hookSpecificOutput"]
+                      ["permissionDecisionReason"])
+
+    def test_exec_readonly_command_is_silent(self):
+        self.activate()
+        self.assertIsNone(self.devin("confirm_write_ops",
+                                     self.exec_tool("git status"), cwd=self.repo))
+
+    def test_fail_closed_asks_in_devin_shape(self):
+        self.activate()
+        (self.run_dir / "state.json").write_text("{not json")
+        out = self.devin("isolation", self.edit("/etc/passwd"), cwd=self.repo)
+        self.assertIsNone(out.get("decision"))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+        self.assertIn("could not decide", out["hookSpecificOutput"]
+                      ["permissionDecisionReason"])
+
+    def test_garbage_input_asks(self):
+        out = self.devin("confirm_write_ops", "{bad", cwd=self.repo)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "ask")
+
+    def test_claim_run_and_session_scope_via_exec(self):
+        self.activate()
+        self.devin("claim_run", {"hook_event_name": "PostToolUse", "tool_name": "exec",
+                                 "tool_input": {"command": "printf '%s' /r | tee "
+                                                      "~/.config/kinetic/active-run",
+                                                "shell_id": "main"},
+                                 "session_id": "s1", "prompt_id": "p1"}, cwd=self.repo)
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
+        # another session is out of scope (its cwd is the project dir, not the run dir)
+        self.assertIsNone(self.devin("isolation", self.edit("/etc/passwd",
+                                                            session_id="s2"),
+                                     cwd=self.repo))
+        out = self.devin("isolation", self.edit("/etc/passwd"), cwd=self.repo)
+        self.assertEqual(out["decision"], "block")
+
+    def test_record_edit_stamps_repo_for_write_tool(self):
+        self.activate()
+        self.devin("record_edit", {"hook_event_name": "PostToolUse", "tool_name": "write",
+                                   "tool_input": {"file_path": str(self.repo / "a.py")},
+                                   "tool_response": {"success": True, "output": "",
+                                                     "error": None},
+                                   "session_id": "s1", "prompt_id": "p1"}, cwd=self.repo)
+        self.assertTrue(state.load(self.run_dir)["repos"]["api"]["last_edit_at"])
+
+    def test_stop_gate_blocks_in_devin_shape(self):
+        self.activate()
+        self.stamp(repo_edit=T3)
+        out = self.devin("completion_gate",
+                         {"hook_event_name": "Stop", "stop_hook_active": False,
+                          "session_id": "s1", "prompt_id": "p1",
+                          "last_assistant_message": "done"}, cwd=self.home)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("kinetic.verify", out["reason"])
+
+    def test_orient_injects_context_for_session_start(self):
+        self.activate()
+        out = self.devin("orient", {"hook_event_name": "SessionStart",
+                                    "source": "startup", "session_id": "s1"},
+                         cwd=self.repo)
+        out = out["hookSpecificOutput"]
+        self.assertEqual(out["hookEventName"], "SessionStart")
+        self.assertIn("feature", out["additionalContext"])
+
+    def test_unknown_harness_falls_back_to_claude(self):
+        self.activate()
+        out = self.hook("isolation", self.edit("/etc/passwd"), harness="bogus",
+                        env={"DEVIN_PROJECT_DIR": ""})
+        self.assertEqual(self.decision(out), "deny")
+
+    def test_explicit_harness_claude_unchanged(self):
+        self.activate()
+        out = self.hook("isolation", {"tool_name": "Write",
+                                      "tool_input": {"file_path": "/etc/passwd"}},
+                        harness="claude")
+        self.assertEqual(self.decision(out), "deny")
+        self.assertIn("hookSpecificOutput", out)
+
+
 class RecordEditAndOrient(HookCase):
     def test_record_edit_stamps_repo(self):
         self.activate()
@@ -394,6 +543,13 @@ class RecordEditAndOrient(HookCase):
         cmds = " ".join(h["command"] for ms in cfg.values() for m in ms for h in m["hooks"])
         for name in ("record_edit", "completion_gate", "isolation", "confirm_write_ops", "confirm_deploy", "orient"):
             self.assertIn(f"{name}.py", cmds)
+
+    def test_hooks_json_passes_harness_claude(self):
+        cfg = json.loads((HOOKS / "hooks.json").read_text())["hooks"]
+        cmds = [h["command"] for ms in cfg.values() for m in ms for h in m["hooks"]]
+        self.assertEqual(len(cmds), 7)
+        for c in cmds:
+            self.assertIn("--harness claude", c)
 
 
 if __name__ == "__main__":
