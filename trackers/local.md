@@ -2,15 +2,15 @@
 
 Access: files only. No `tracker` key in settings means local. Tickets are readable markdown files at `<run_dir>/issues/NN-<repo>-<slug>.md`; kinetic state in the run directory is the source of truth, and the files are a view of it.
 
-`python3 -m kinetic.board header --run <dir> --id <id>` owns each ticket file's header: its keys, order and format. Do not restate or edit the header by hand. Every write is two steps: update kinetic state (`python3 -m kinetic.state set-ticket` or `human-done`), then run `header` for that ticket and `python3 -m kinetic.board render --run <dir>` to refresh the table. `python3 -m kinetic.board drift --run <dir>` reports any difference between a file and state.
+`kinetic board header --run <dir> --id <id>` owns each ticket file's header: its keys, order and format. Do not restate or edit the header by hand. Every write is two steps: update kinetic state (`kinetic state set-ticket` or `human-done`), then run `header` for that ticket and `kinetic board render --run <dir>` to refresh the table. `kinetic board drift --run <dir>` reports any difference between a file and state.
 
 ## Operations
 
 ### create slice parent
-Create the slice folder `<run_dir>/issues/` and its `README.md` with `kinetic.board render`. The folder is the parent reference.
+Create the slice folder `<run_dir>/issues/` and its `README.md` with `kinetic board render`. The folder is the parent reference.
 
 ### create child
-Record the ticket in state (the tickets phase writes it into the run's state), then `kinetic.board header` writes its file, then `kinetic.board render`.
+Record the ticket in state (the tickets phase writes it into the run's state), then `kinetic board header` writes its file, then `kinetic board render`.
 
 ### link blocker
 Record `blocked_by` with its edge type in state, then `header` for the ticket.

@@ -48,6 +48,16 @@ class SkillTextTest(unittest.TestCase):
                     bad.append("%s: %s" % (p.relative_to(ROOT), needle))
         self.assertEqual(bad, [])
 
+    def test_no_claude_plugin_root_or_module_invocations(self):
+        bad = []
+        for p in _text_files("skills", "agents", "trackers"):
+            text = p.read_text()
+            for needle in ("${CLAUDE_PLUGIN_ROOT}", "PYTHONPATH",
+                           "python3 -m kinetic"):
+                if needle in text:
+                    bad.append("%s: %s" % (p.relative_to(ROOT), needle))
+        self.assertEqual(bad, [])
+
     def test_implementer_has_needs_human(self):
         text = (ROOT / "agents" / "implementer.md").read_text()
         self.assertIn("NEEDS_HUMAN", text)
