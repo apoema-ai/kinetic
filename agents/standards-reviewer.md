@@ -2,6 +2,7 @@
 name: standards-reviewer
 description: Read-only review of one finished kinetic ticket diff against the repo's documented standards and the tdd skill's test rules. Dispatched only by /kinetic:run.
 model: opus
+tier: strong
 tools: Read, Grep, Glob, Bash
 ---
 

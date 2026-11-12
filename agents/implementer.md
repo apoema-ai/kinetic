@@ -2,6 +2,7 @@
 name: implementer
 description: Implements exactly one kinetic ticket inside its own git worktree, test-first, runs the repo's verify command, and writes a pointer-only report file. Dispatched only by /kinetic:run.
 model: sonnet
+tier: standard
 tools: Read, Edit, Write, Grep, Glob, Bash
 skills: [tdd]
 ---

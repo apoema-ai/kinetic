@@ -102,6 +102,89 @@ class ActiveHarnessTest(unittest.TestCase):
             harness.active_harness(None, self.settings)
 
 
+class ResolveTierTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.settings = self.tmp / "settings.json"
+
+    def _write(self, obj):
+        self.settings.write_text(json.dumps(obj))
+
+    def test_profile_defaults_per_harness(self):
+        expected = {
+            "claude": {"standard": {"model": "sonnet"},
+                       "strong": {"model": "opus"}},
+            "devin": {"standard": {"model": "sonnet"},
+                      "strong": {"model": "opus"}},
+            "codex": {"standard": {"model": "gpt-5.1-codex", "effort": "medium"},
+                      "strong": {"model": "gpt-5.1-codex", "effort": "high"}},
+            "opencode": {"standard": {"model": "anthropic/claude-sonnet-4-5"},
+                         "strong": {"model": "anthropic/claude-opus-4-1"}},
+        }
+        missing = self.tmp / "missing.json"
+        with mock.patch.object(harness, "DEFAULT_SETTINGS", missing):
+            for hid, tiers in expected.items():
+                for tier, want in tiers.items():
+                    self.assertEqual(harness.resolve_tier(hid, tier, missing), want)
+                    self.assertEqual(harness.resolve_tier(hid, tier), want)
+
+    def test_settings_override_per_harness_and_tier(self):
+        self._write({"tiers": {
+            "codex": {"strong": {"model": "gpt-5.1-codex-max", "effort": "xhigh"}},
+            "opencode": {"standard": {"model": "anthropic/claude-haiku-4-5"}},
+        }})
+        self.assertEqual(
+            harness.resolve_tier("codex", "strong", self.settings),
+            {"model": "gpt-5.1-codex-max", "effort": "xhigh"})
+        self.assertEqual(
+            harness.resolve_tier("opencode", "standard", self.settings),
+            {"model": "anthropic/claude-haiku-4-5"})
+        # Untouched tiers and harnesses keep their profile defaults.
+        self.assertEqual(
+            harness.resolve_tier("codex", "standard", self.settings),
+            {"model": "gpt-5.1-codex", "effort": "medium"})
+        self.assertEqual(
+            harness.resolve_tier("opencode", "strong", self.settings),
+            {"model": "anthropic/claude-opus-4-1"})
+
+    def test_partial_override_keeps_profile_keys(self):
+        self._write({"tiers": {"codex": {"strong": {"model": "gpt-5.1-codex-max"}}}})
+        self.assertEqual(
+            harness.resolve_tier("codex", "strong", self.settings),
+            {"model": "gpt-5.1-codex-max", "effort": "high"})
+
+    def test_override_does_not_leak_across_harnesses(self):
+        self._write({"tiers": {"codex": {"standard": {"model": "other-model"}}}})
+        self.assertEqual(
+            harness.resolve_tier("claude", "standard", self.settings),
+            {"model": "sonnet"})
+        self.assertEqual(
+            harness.resolve_tier("opencode", "standard", self.settings),
+            {"model": "anthropic/claude-sonnet-4-5"})
+
+    def test_unknown_harness_and_tier_raise(self):
+        with self.assertRaises(harness.HarnessError):
+            harness.resolve_tier("emacs", "standard", self.settings)
+        with self.assertRaises(harness.HarnessError):
+            harness.resolve_tier("codex", "turbo", self.settings)
+
+    def test_malformed_tiers_raise(self):
+        self._write({"tiers": ["not", "a", "dict"]})
+        with self.assertRaises(harness.HarnessError):
+            harness.resolve_tier("codex", "standard", self.settings)
+        self._write({"tiers": {"codex": {"standard": "gpt-5"}}})
+        with self.assertRaises(harness.HarnessError):
+            harness.resolve_tier("codex", "standard", self.settings)
+        self._write({"tiers": {"codex": {"standard": {"model": 42}}}})
+        with self.assertRaises(harness.HarnessError):
+            harness.resolve_tier("codex", "standard", self.settings)
+
+    def test_bad_json_settings_raises(self):
+        self.settings.write_text("{bad")
+        with self.assertRaises(harness.HarnessError):
+            harness.resolve_tier("codex", "standard", self.settings)
+
+
 class CliTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

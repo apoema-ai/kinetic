@@ -22,6 +22,10 @@ GUARANTEES = (
     "review-read-only",       # assert-unchanged discards a review that touched the worktree
 )
 
+# The only model tiers agents may declare; each harness maps them to a concrete
+# model (and reasoning effort where it has one) via tier_defaults/settings tiers.
+TIERS = ("standard", "strong")
+
 # hooks.stop: "block" (Stop hook can stop the agent finishing), "reprompt"
 # (idle re-prompt only, the agent can still stop) or "none".
 _PROFILES = {
@@ -178,6 +182,58 @@ def instructed(p: dict) -> list[str]:
     """Guarantees that are only Instructed (skill text) on this harness."""
     enforced = set(p["enforced"])
     return [g for g in GUARANTEES if g not in enforced]
+
+
+def _tier_mapping(harness_id: str, tier: str, settings) -> dict:
+    """The settings.json tiers[harness_id][tier] object, or {} when absent."""
+    path = Path(settings) if settings else DEFAULT_SETTINGS
+    try:
+        cfg = _load(path)
+    except ConfigError as e:
+        raise HarnessError(str(e))
+    tiers = cfg.get("tiers") or {}
+    if not isinstance(tiers, dict):
+        raise HarnessError(f'"tiers" in {path} must be a JSON object')
+    per_harness = tiers.get(harness_id) or {}
+    if not isinstance(per_harness, dict):
+        raise HarnessError(f'"tiers.{harness_id}" in {path} must be a JSON object')
+    mapping = per_harness.get(tier) or {}
+    if not isinstance(mapping, dict):
+        raise HarnessError(
+            f'"tiers.{harness_id}.{tier}" in {path} must be a JSON object')
+    for key in ("model", "effort"):
+        if key in mapping and not isinstance(mapping[key], str):
+            raise HarnessError(
+                f'"tiers.{harness_id}.{tier}.{key}" in {path} must be a string')
+    return mapping
+
+
+def resolve_tier(harness_id: str, tier: str, settings=None) -> dict:
+    """Resolve an agent's model tier to {"model": ..., "effort": ...}.
+
+    The harness profile's tier_defaults give the baseline. settings.json may
+    override per harness per tier:
+
+        "tiers": {"<harness>": {"standard": {"model": ..., "effort": ...},
+                                "strong":  {"model": ..., "effort": ...}}}
+
+    Only the "model" and "effort" keys are read from an override; each one it
+    sets wins over the profile default and unset keys keep the default.
+    `settings` is a path to a settings.json file (default: the user config);
+    Claude Code and Devin load agents/*.md straight from the clone and keep
+    their frontmatter "model:" — this resolver exists for the generated
+    Codex/OpenCode agent definitions (and resolvability checks like doctor's).
+    """
+    p = profile(harness_id)
+    if tier not in TIERS:
+        raise HarnessError(
+            f"unknown tier '{tier}': expected one of {', '.join(TIERS)}")
+    resolved = dict(p["tier_defaults"][tier])
+    mapping = _tier_mapping(harness_id, tier, settings)
+    for key in ("model", "effort"):
+        if key in mapping:
+            resolved[key] = mapping[key]
+    return resolved
 
 
 def _yes(v) -> str:
