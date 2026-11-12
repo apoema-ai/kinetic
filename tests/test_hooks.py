@@ -631,6 +631,172 @@ class CodexHooks(HookCase):
         self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
 
 
+class OpenCodeHooks(HookCase):
+    """Payloads as the generated OpenCode plugin forwards them: the raw
+    tool.execute.before/after event fields (sessionID, agent, messageID, id,
+    tool, input) plus kinetic_event and cwd. Tool inputs use OpenCode's own
+    spellings — edit/write carry "path", patch carries patchText, shell
+    carries "command"/"workdir". Pre-tool decisions render flat
+    {"decision","reason"} (deny -> the plugin throws, ask -> permission
+    evaluate); completion_gate keeps {"decision":"block"} and orient keeps
+    hookSpecificOutput.additionalContext, both mapped by the plugin."""
+
+    def oc(self, name, payload, **kw):
+        return self.hook(name, payload, harness="opencode", **kw)
+
+    def pre(self, tool, input_, sid="s1", **extra):
+        payload = {"kinetic_event": "PreToolUse", "cwd": str(self.repo),
+                   "sessionID": sid, "agent": "build", "messageID": "m1",
+                   "id": "call1", "tool": tool, "input": input_}
+        payload.update(extra)
+        return payload
+
+    def post(self, tool, input_, sid="s1", status="completed", **extra):
+        payload = {"kinetic_event": "PostToolUse", "cwd": str(self.repo),
+                   "sessionID": sid, "agent": "build", "messageID": "m1",
+                   "id": "call1", "tool": tool, "input": input_,
+                   "status": status}
+        payload.update(extra)
+        return payload
+
+    def patch(self, *sections):
+        return "*** Begin Patch\n" + "".join(sections) + "*** End Patch"
+
+    def update(self, path, body="@@\n-old\n+new\n"):
+        return f"*** Update File: {path}\n{body}"
+
+    def decision(self, out):
+        return out.get("decision") if out else None
+
+    def test_edit_outside_is_denied_in_opencode_shape(self):
+        self.activate()
+        out = self.oc("isolation", self.pre("edit", {"path": "/etc/passwd"}))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("outside the run workspace", out["reason"])
+        self.assertNotIn("hookSpecificOutput", out)
+
+    def test_write_and_relative_path_use_session_cwd(self):
+        self.activate()
+        self.assertIsNone(self.oc("isolation",
+                                  self.pre("write", {"path": "sub/a.py"})))
+        out = self.oc("isolation", self.pre("write", {"path": "a.py"},
+                                            cwd=str(self.home)))
+        self.assertEqual(out["decision"], "deny")
+
+    def test_patch_tool_extracts_file_paths(self):
+        self.activate()
+        out = self.oc("isolation", self.pre(
+            "patch", {"patchText": self.patch(self.update("/etc/evil.py"))}))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIn("evil.py", out["reason"])
+        # multi-file patch: any outside path denies
+        patch = self.patch(self.update(str(self.repo / "ok.py")),
+                           self.update("/etc/evil.py"))
+        out = self.oc("isolation", self.pre("patch", {"patchText": patch}))
+        self.assertEqual(out["decision"], "deny")
+        # a patch inside the workspace is allowed
+        patch = self.patch(self.update(str(self.repo / "a.py")))
+        self.assertIsNone(self.oc("isolation",
+                                  self.pre("patch", {"patchText": patch})))
+
+    def test_patch_unparseable_asks(self):
+        self.activate()
+        out = self.oc("isolation",
+                      self.pre("patch", {"patchText": "not a patch"}))
+        self.assertEqual(out["decision"], "ask")
+
+    def test_shell_maps_to_bash_for_confirm_write_ops(self):
+        self.activate()
+        out = self.oc("confirm_write_ops", self.pre(
+            "shell", {"command": "git push origin main"}))
+        self.assertEqual(out["decision"], "deny")
+        self.assertIsNone(self.oc("confirm_write_ops", self.pre(
+            "shell", {"command": "git status"})))
+        # v1 spelled the shell tool "bash"; it maps the same way
+        out = self.oc("confirm_write_ops", self.pre(
+            "bash", {"command": "git push origin main"}))
+        self.assertEqual(out["decision"], "deny")
+
+    def test_mcp_namespaced_write_ops_ask(self):
+        self.activate()
+        for tool in ("github_create_pull_request",
+                     "atlassian_create_issue"):
+            out = self.oc("confirm_write_ops", self.pre(tool, {}))
+            self.assertEqual(out["decision"], "ask", tool)
+
+    def test_mcp_deploy_asks(self):
+        self.activate()
+        out = self.oc("confirm_deploy",
+                      self.pre("tekton_trigger_deploy", {}))
+        self.assertEqual(out["decision"], "ask")
+
+    def test_record_edit_stamps_repo_for_write_and_patch(self):
+        self.activate()
+        self.oc("record_edit", self.post(
+            "write", {"path": str(self.repo / "a.py")}))
+        self.assertTrue(state.load(self.run_dir)["repos"]["api"]["last_edit_at"])
+        self.oc("record_edit", self.post(
+            "patch", {"patchText": self.patch(
+                self.update(str(self.run_dir / "notes.md")))}))
+        st = state.load(self.run_dir)
+        self.assertTrue(st["repos"]["api"]["last_edit_at"])
+        # run-dir artifacts are not code (R25)
+        self.assertFalse(st["last_edit_at"])
+
+    def test_failed_edit_is_not_recorded(self):
+        self.activate()
+        self.oc("record_edit", self.post(
+            "write", {"path": str(self.repo / "a.py")}, status="error"))
+        self.assertFalse(state.load(self.run_dir)["repos"]["api"]
+                         .get("last_edit_at"))
+
+    def test_claim_run_via_shell(self):
+        self.activate()
+        self.oc("claim_run", self.post(
+            "shell", {"command": "printf '%s' /r | tee "
+                                "~/.config/kinetic/active-run"}))
+        self.assertEqual(state.load(self.run_dir).get("owner_session"), "s1")
+
+    def test_session_scope_uses_sessionID(self):
+        self.activate()
+        self.oc("claim_run", self.post(
+            "shell", {"command": "printf '%s' /r | tee "
+                                "~/.config/kinetic/active-run"}, sid="s1"))
+        # another session is out of scope unless its cwd is inside the run dir
+        self.assertIsNone(self.oc("isolation", self.pre(
+            "edit", {"path": "/etc/passwd"}, sid="s2", cwd=str(self.home))))
+        out = self.oc("isolation", self.pre(
+            "edit", {"path": "/etc/passwd"}, sid="s1"))
+        self.assertEqual(out["decision"], "deny")
+
+    def test_stop_gate_blocks_on_idle(self):
+        self.activate()
+        self.stamp(repo_edit=T3)
+        out = self.oc("completion_gate",
+                      {"kinetic_event": "Stop", "sessionID": "s1",
+                       "cwd": str(self.repo), "stop_hook_active": False})
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("kinetic verify", out["reason"])
+
+    def test_orient_injects_context(self):
+        self.activate()
+        out = self.oc("orient", {"kinetic_event": "SessionStart",
+                                 "sessionID": "s1"})
+        hso = out["hookSpecificOutput"]
+        self.assertIn("feature", hso["additionalContext"])
+
+    def test_fail_closed_asks_in_opencode_shape(self):
+        self.activate()
+        (self.run_dir / "state.json").write_text("{not json")
+        out = self.oc("isolation", self.pre("edit", {"path": "/etc/passwd"}))
+        self.assertEqual(out["decision"], "ask")
+        self.assertIn("could not decide", out["reason"])
+
+    def test_garbage_input_asks(self):
+        out = self.oc("confirm_write_ops", "{bad")
+        self.assertEqual(out["decision"], "ask")
+
+
 class RecordEditAndOrient(HookCase):
     def test_record_edit_stamps_repo(self):
         self.activate()

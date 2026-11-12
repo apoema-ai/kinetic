@@ -150,9 +150,64 @@ def _norm_codex(inp: dict) -> dict:
     return out
 
 
-# Per-harness input normalisers. claude passes through untouched; codex and
-# opencode arrive in their tickets. Codex adds apply_patch header parsing.
-_NORMALIZERS = {"devin": _norm_devin, "codex": _norm_codex}
+def _norm_opencode(inp: dict) -> dict:
+    """Normalise an OpenCode payload into the Claude shape the hooks read.
+
+    The generated plugin (templates/opencode-plugin.ts) forwards the raw
+    tool.execute.before/after event fields — sessionID, agent, messageID, id,
+    tool, input — plus kinetic_event (the phase: PreToolUse/PostToolUse/Stop/
+    SessionStart) and cwd (the session's directory, resolved via
+    ctx.session.get). OpenCode tool inputs spell paths differently: edit and
+    write use "path", and patch carries the raw apply_patch text in
+    patchText, whose file headers are extracted into file_paths exactly like
+    Codex's apply_patch. The v2 shell tool is "shell" (v1 called it "bash");
+    both map to "Bash". An optional shell "workdir" narrows cwd."""
+    out = dict(inp)
+    if out.get("session_id") is None and out.get("sessionID") is not None:
+        out["session_id"] = out.get("sessionID")
+    if out.get("tool_name") is None and out.get("tool") is not None:
+        out["tool_name"] = out.get("tool")
+    if out.get("tool_input") is None and out.get("input") is not None:
+        out["tool_input"] = out.get("input")
+    if out.get("hook_event_name") is None and out.get("kinetic_event") is not None:
+        out["hook_event_name"] = out.get("kinetic_event")
+
+    raw_ti = out.get("tool_input")
+    ti = dict(raw_ti) if isinstance(raw_ti, dict) else {}
+    if not ti.get("file_path"):
+        for key in ("path", "filePath", "file_path", "notebook_path"):
+            if ti.get(key):
+                ti["file_path"] = ti[key]
+                break
+    name = out.get("tool_name")
+    alias = _tool_aliases("opencode").get(name)
+    if alias:
+        out["tool_name"] = alias
+    if out.get("tool_name") in ("shell", "bash"):
+        # v2 renamed bash -> shell; accept both spellings
+        out["tool_name"] = "Bash"
+    if name == "patch":
+        # same *** Begin Patch grammar as Codex apply_patch; file_paths is set
+        # even when empty so fail-closed hooks can tell "no paths parsed"
+        # apart from "not a patch tool"
+        text = ti.get("patchText") or ti.get("patch") or ti.get("command") or ""
+        ti["file_paths"] = _patch_paths(text)
+    workdir = ti.get("workdir")
+    if isinstance(workdir, str) and workdir:
+        out["cwd"] = abs_path(workdir, out.get("cwd"))
+    # a failed call touched nothing: drop its input so post-tool hooks
+    # (record_edit, claim_run) record only completed work. The plugin already
+    # filters status!=="completed"; this covers direct invocations too.
+    if out.get("hook_event_name") == "PostToolUse" \
+            and out.get("status") not in (None, "completed"):
+        ti = {}
+    out["tool_input"] = ti
+    return out
+
+
+# Per-harness input normalisers. claude passes through untouched.
+_NORMALIZERS = {"devin": _norm_devin, "codex": _norm_codex,
+                "opencode": _norm_opencode}
 
 
 def _normalize(inp: dict, harness: str) -> dict:
@@ -221,9 +276,18 @@ def _pre_tool_devin(decision: str, reason: str) -> None:
             "permissionDecisionReason": reason}}))
 
 
+def _pre_tool_opencode(decision: str, reason: str) -> None:
+    """Flat decision shape the generated OpenCode plugin maps back: deny
+    throws inside tool.execute.before, ask escalates the call's permission
+    evaluation to 'ask' with reason as the message."""
+    print(json.dumps({"decision": decision, "reason": reason}))
+
+
 def pre_tool(decision: str, reason: str) -> None:
     if _HARNESS == "devin":
         _pre_tool_devin(decision, reason)
+    elif _HARNESS == "opencode":
+        _pre_tool_opencode(decision, reason)
     else:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": decision,

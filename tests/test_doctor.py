@@ -445,6 +445,58 @@ class DoctorTest(unittest.TestCase):
         c = self._by_name()
         self.assertEqual(c["hooks-registered"]["status"], "fail")
 
+    def _opencode_plugin(self, clone):
+        """Write ~/.config/opencode/plugins/kinetic.ts pointing at clone."""
+        plugin = self.home / ".config" / "opencode" / "plugins" / "kinetic.ts"
+        plugin.parent.mkdir(parents=True, exist_ok=True)
+        plugin.write_text(f'const CLONE = "{clone}"\n')
+        return plugin
+
+    def test_opencode_hooks_registered_checks_plugin(self):
+        clone = self._fake_clone("oc-clone")
+        self._write_settings(harness="opencode", clone=str(clone))
+        c = self._by_name()
+        # no plugin at all -> warn to install
+        self.assertEqual(c["hooks-registered"]["status"], "warn")
+        self.assertIn("kinetic install --harness opencode",
+                      c["hooks-registered"]["fix"])
+
+        plugin = self._opencode_plugin(clone)
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "pass")
+        # OpenCode plugins load without a trust step
+        self.assertEqual(c["hooks-trusted"]["status"], "na")
+
+        # plugin baked path points at a different clone -> stale -> fail
+        moved = self._fake_clone("oc-clone2")
+        plugin.write_text(f'const CLONE = "{moved}"\n')
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "fail")
+        self.assertIn("kinetic install --harness opencode",
+                      c["hooks-registered"]["fix"])
+
+        # missing clone -> fail
+        gone = self.tmp / "gone"
+        self._write_settings(harness="opencode", clone=str(gone))
+        c = self._by_name()
+        self.assertEqual(c["hooks-registered"]["status"], "fail")
+        self.assertIn("clone path missing", c["hooks-registered"]["fix"])
+
+    def test_opencode_manifest_plugin_file_checked_for_staleness(self):
+        clone = self._fake_clone("oc-clone")
+        self._write_settings(harness="opencode", clone=str(clone))
+        plugin = self._opencode_plugin(clone)
+        self._write_manifest(
+            "opencode", clone=clone,
+            files={str(plugin): {"type": "file",
+                                 "sha256": hashlib.sha256(
+                                     plugin.read_bytes()).hexdigest()}})
+        c = self._by_name()
+        self.assertEqual(c["install-manifest"]["status"], "pass")
+        plugin.write_text("changed")
+        c = self._by_name()
+        self.assertEqual(c["install-manifest"]["status"], "fail")
+
     def test_tier_mapping_check(self):
         clone = self._fake_clone()
         self._write_settings(harness="claude", clone=str(clone))

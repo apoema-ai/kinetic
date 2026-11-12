@@ -956,6 +956,260 @@ def _install_codex(clone: Path, home: Path) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# OpenCode
+#
+# `kinetic install --harness opencode` is file generation only, like Codex:
+# OpenCode discovers plugins as *.ts files under ~/.config/opencode/plugins,
+# skills under ~/.config/opencode/skills and agents under
+# ~/.config/opencode/agents — no config-file merge and no trust step, so the
+# installer writes files and records them in the manifest; it never edits
+# opencode.json and never shells out to opencode (the CLI is only reported
+# missing, since file-drop plugins also serve desktop/alternate installs).
+# Each skill becomes a flat kntc-<name>.md stub whose body points at the
+# clone's skills/<name>/SKILL.md; user-only skills carry
+# disable-model-invocation: true, which OpenCode honours natively. Each
+# agents/*.md becomes a markdown agent whose tier resolves through
+# harness.resolve_tier and whose Claude tools: allow-list maps onto
+# OpenCode permission denies for the capability groups it omits. The plugin
+# (templates/opencode-plugin.ts with the clone path baked in) forwards
+# tool.execute.before/after, permission.evaluate, experimental.idle and
+# session context events to the Python hooks.
+
+
+def _opencode_dir(home: Path) -> Path:
+    return home / ".config" / "opencode"
+
+
+def _opencode_skills_dir(home: Path) -> Path:
+    return _opencode_dir(home) / "skills"
+
+
+def _opencode_agents_dir(home: Path) -> Path:
+    return _opencode_dir(home) / "agents"
+
+
+def _opencode_plugin_path(home: Path) -> Path:
+    return _opencode_dir(home) / "plugins" / "kinetic.ts"
+
+
+def _opencode_skill_files(clone: Path, skills_root: Path) -> dict:
+    """{path: text} for every flat kntc-<name>.md stub skill. OpenCode reads
+    disable-model-invocation frontmatter natively, so user-only skills need
+    no sidecar (unlike Codex's agents/openai.yaml)."""
+    skills_src = clone / "skills"
+    if not skills_src.is_dir():
+        raise ValueError(f"{skills_src} is missing; cannot generate skills")
+    out = {}
+    for skill_md in sorted(skills_src.glob("*/SKILL.md")):
+        fields, _body = _split_frontmatter(skill_md)
+        name = skill_md.parent.name
+        fm_name = fields.get("name")
+        if fm_name is not None and fm_name != name:
+            raise ValueError(
+                f"{skill_md}: frontmatter name {fm_name!r} != directory "
+                f"{name!r}")
+        desc = fields.get("description")
+        if not isinstance(desc, str) or not desc:
+            raise ValueError(
+                f"{skill_md}: frontmatter needs a description")
+        fm = ["---",
+              f"name: kntc-{name}",
+              f"description: {json.dumps('kinetic: ' + desc, ensure_ascii=False)}"]
+        if fields.get("disable-model-invocation") is True:
+            fm.append("disable-model-invocation: true")
+        fm.append("---")
+        out[skills_root / f"kntc-{name}.md"] = (
+            "\n".join(fm) + "\n\n"
+            f"Read and follow `{clone}/skills/{name}/SKILL.md`.\n")
+    if not out:
+        raise ValueError(f"{skills_src}: no skills found")
+    return out
+
+
+# Claude tool names -> the OpenCode permission action that covers them, used
+# to translate an agent's tools: allow-list into deny rules for the groups it
+# omits (OpenCode permissions are last-match-wins deny/ask/allow rules; a
+# subagent with no edit tools gets {action: edit, effect: deny}).
+_OPENCODE_AGENT_ACTIONS = {
+    "edit": {"Write", "Edit", "MultiEdit", "NotebookEdit"},
+    "shell": {"Bash", "exec", "shell"},
+    "read": {"Read"},
+    "grep": {"Grep"},
+    "glob": {"Glob", "GlobTool"},
+    "webfetch": {"WebFetch", "webfetch"},
+    "websearch": {"WebSearch", "websearch"},
+    "subagent": {"Task", "Agent", "run_subagent"},
+}
+
+
+def _opencode_agent_tools(fields: dict) -> set:
+    """The agent's tools: allow-list as a set of names ([] when absent)."""
+    tools = fields.get("tools") or []
+    if isinstance(tools, str):
+        tools = [t.strip() for t in tools.split(",")]
+    return {str(t).strip() for t in tools if str(t).strip()}
+
+
+def _opencode_permissions(fields: dict) -> list:
+    """Deny rules for capability groups missing from the tools: allow-list.
+    No tools: frontmatter means no allow-list, so no denies."""
+    tools = _opencode_agent_tools(fields)
+    if not tools:
+        return []
+    denies = []
+    for action in sorted(_OPENCODE_AGENT_ACTIONS):
+        if not (_OPENCODE_AGENT_ACTIONS[action] & tools):
+            denies.append({"action": action, "resource": "*",
+                           "effect": "deny"})
+    return denies
+
+
+def _opencode_agent_files(clone: Path, agents_root: Path,
+                          settings_path: Path) -> dict:
+    """{path: text} of ~/.config/opencode/agents/<name>.md generated from
+    agents/*.md. Frontmatter accepts description/mode/model/permissions; the
+    markdown body becomes the system prompt. Every kinetic agent is a
+    dispatched subagent, so mode is always subagent; the tier resolves
+    through harness.resolve_tier so settings.json tiers.opencode applies."""
+    agents_src = clone / "agents"
+    if not agents_src.is_dir():
+        raise ValueError(f"{agents_src} is missing; cannot generate agents")
+    out = {}
+    for md in sorted(agents_src.glob("*.md")):
+        fields, body = _split_frontmatter(md)
+        name = md.stem
+        fm_name = fields.get("name")
+        if fm_name is not None and fm_name != name:
+            raise ValueError(
+                f"{md}: frontmatter name {fm_name!r} != file {name!r}")
+        desc = fields.get("description")
+        tier = fields.get("tier")
+        if not isinstance(desc, str) or not desc \
+                or not isinstance(tier, str) or not tier:
+            raise ValueError(
+                f"{md}: frontmatter needs description and tier")
+        try:
+            resolved = harness.resolve_tier("opencode", tier,
+                                            settings=settings_path)
+        except harness.HarnessError as e:
+            raise ValueError(f"{md}: {e}")
+        fm = ["---",
+              f"description: {json.dumps(desc, ensure_ascii=False)}",
+              "mode: subagent"]
+        if resolved.get("model"):
+            fm.append(f"model: {json.dumps(resolved['model'])}")
+        perms = _opencode_permissions(fields)
+        if perms:
+            fm.append("permissions:")
+            for p in perms:
+                fm += [f"- action: {p['action']}",
+                       f"  resource: {json.dumps(p['resource'])}",
+                       f"  effect: {p['effect']}"]
+        fm.append("---")
+        out[agents_root / f"{name}.md"] = (
+            "\n".join(fm) + "\n\n" + body.strip("\n") + "\n")
+    if not out:
+        raise ValueError(f"{agents_src}: no agents found")
+    return out
+
+
+def _opencode_plugin_text(clone: Path) -> str:
+    """templates/opencode-plugin.ts with the clone path baked in as a JSON
+    string literal (valid JS)."""
+    tpl_path = clone / "templates" / "opencode-plugin.ts"
+    try:
+        tpl = tpl_path.read_text()
+    except OSError as e:
+        raise ValueError(f"cannot read {tpl_path}: {e}")
+    if "__KINETIC_CLONE__" not in tpl:
+        raise ValueError(f"{tpl_path}: missing __KINETIC_CLONE__ placeholder")
+    return tpl.replace("__KINETIC_CLONE__", json.dumps(str(clone)))
+
+
+def _opencode_generated_files(clone: Path, home: Path,
+                              settings_path: Path) -> dict:
+    """All files _install_opencode writes, {path: text}, for preflight and
+    manifest recording."""
+    out = _opencode_skill_files(clone, _opencode_skills_dir(home))
+    out.update(_opencode_agent_files(clone, _opencode_agents_dir(home),
+                                     settings_path))
+    out[_opencode_plugin_path(home)] = _opencode_plugin_text(clone)
+    return out
+
+
+def _install_opencode(clone: Path, home: Path) -> int:
+    launcher = clone / "bin" / "kinetic"
+    link = _bin_dir(home) / "kinetic"
+    manifest_path = _manifest_path(home, "opencode")
+    prev = _read_manifest(manifest_path) or {}
+    prev_files = prev.get("files") or {}
+    settings_path = _settings_path(home)
+
+    # Preflight everything that can fail before any file is written. Unlike
+    # codex/devin the opencode CLI is not required on PATH: plugins are
+    # file-dropped into ~/.config/opencode/plugins and also serve installs
+    # whose binary is not on PATH (desktop app, version managers).
+    try:
+        _load(settings_path)
+        generated = _opencode_generated_files(clone, home, settings_path)
+    except (ConfigError, ValueError, OSError) as e:
+        print(f"kinetic install: {e}", file=sys.stderr)
+        return 1
+    n_skills = sum(1 for p in generated
+                   if p.parent == _opencode_skills_dir(home))
+    n_agents = sum(1 for p in generated
+                   if p.parent == _opencode_agents_dir(home))
+
+    if _ensure_link(link, launcher, prev_files) != 0:
+        return 1
+    res = _write_install_settings(home, clone, "opencode", prev)
+    if res is None:
+        return 1
+    sp, existed, previous = res
+
+    for path, text in generated.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, text)
+
+    files = {str(link): _link_entry(link, launcher)}
+    for path in generated:
+        files[str(path)] = {"type": "file", "sha256": _hash_file(path)}
+    manifest = {
+        "version": MANIFEST_VERSION,
+        "harness": "opencode",
+        "clone": str(clone),
+        "files": files,
+        "settings": _settings_manifest(sp, "opencode", clone, existed, previous),
+    }
+    atomic_write(manifest_path,
+                 json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    print("installed kinetic for harness opencode")
+    print(f"  launcher: {link} -> {launcher}")
+    print(f"  skills: {n_skills} stubs under {_opencode_skills_dir(home)} "
+          f"(kntc-<name>)")
+    print(f"  agents: {n_agents} files under {_opencode_agents_dir(home)}")
+    print(f"  plugin: {_opencode_plugin_path(home)}")
+    print(f"  settings: harness=opencode clone={clone} in {sp}")
+    print(f"  manifest: {manifest_path}")
+    print()
+    if shutil.which("opencode") is None:
+        print("note: 'opencode' CLI not found on PATH; the plugin still "
+              "loads next time OpenCode starts (file-drop plugins need no "
+              "registration).")
+    print()
+    print("OpenCode loads ~/.config/opencode/plugins/*.ts automatically; "
+          "no config edit or trust step is needed. Verify with "
+          "docs/smoke/opencode.md.")
+    print()
+    print("Make sure ~/.local/bin is on your PATH (it is on most macOS/Linux "
+          "setups; add it to your shell profile if `kinetic` is not found), "
+          "then re-run `kinetic install --harness opencode` after `git pull` "
+          "to pick up updates.")
+    return 0
+
+
 def _strip_codex_hooks(path: Path, existed: bool):
     """Remove kinetic's `--harness codex` hooks from a Codex hooks.json,
     preserving everything else. Returns a warning or None."""
@@ -1126,32 +1380,34 @@ def _uninstall(harness_id: str, home: Path) -> int:
             warnings.append(warn)
         elif cpath.exists():
             kept.append(str(cpath) + " (foreign entries kept)")
-        # prune directories that only held files this uninstall removed
-        # (kntc-<name>/ and kntc-<name>/agents/ under ~/.agents/skills, and
-        # ~/.codex/agents itself when empty)
-        stops = (_agents_skills_dir(home), _codex_agents_dir(home))
-        dirs = set()
-        for name in removed:
-            p = Path(name)
-            for stop in stops:
-                try:
-                    p.relative_to(stop)
-                except ValueError:
-                    continue
-                cur = p
-                while cur != stop:
-                    dirs.add(cur)
-                    cur = cur.parent
-        for d in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
-            try:
-                d.rmdir()
-            except OSError:
-                pass
+
+    # prune directories that only held files this uninstall removed
+    # (kntc-<name>/ and kntc-<name>/agents/ under ~/.agents/skills,
+    # ~/.codex/agents, ~/.config/opencode/skills and .../agents when empty)
+    stops = (_agents_skills_dir(home), _codex_agents_dir(home),
+             _opencode_skills_dir(home), _opencode_agents_dir(home))
+    dirs = set()
+    for name in removed:
+        p = Path(name)
         for stop in stops:
             try:
-                stop.rmdir()
-            except OSError:
-                pass
+                p.relative_to(stop)
+            except ValueError:
+                continue
+            cur = p
+            while cur != stop:
+                dirs.add(cur)
+                cur = cur.parent
+    for d in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+    for stop in stops:
+        try:
+            stop.rmdir()
+        except OSError:
+            pass
 
     plugin = manifest.get("plugin")
     pname = plugin.get("name") if isinstance(plugin, dict) else None
@@ -1210,6 +1466,8 @@ def main(argv=None) -> int:
         return _install_devin(clone, home)
     if a.harness == "codex":
         return _install_codex(clone, home)
+    if a.harness == "opencode":
+        return _install_opencode(clone, home)
     print(f"kinetic install: --harness {a.harness} is not yet supported",
           file=sys.stderr)
     return 1
