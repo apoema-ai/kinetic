@@ -14,6 +14,9 @@
 ### Attention points:
 <<ATTENTION_POINTS>>
 
+### Rulings:
+<<RULINGS>>
+
 ### Manual steps:
 <<MANUAL_STEPS>>
 
