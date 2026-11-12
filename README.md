@@ -40,29 +40,45 @@ It merges ideas from three plugins: Matt Pocock's skills (grill, spec, tickets, 
 
 Requirements: macOS or Linux, Python 3.9+, `git`, and `gh` authenticated to GitHub. Jira mode also needs the Atlassian MCP server; GitHub issues mode needs `gh` with issue access; Linear mode needs a Linear MCP server.
 
-For local use, install from a checkout. Claude Code:
+Clone the repo first (every harness installs from a checkout, because `kinetic install` links the CLI and generates harness files from it):
 
 ```
-<path-to-kinetic>/bin/kinetic install --harness claude
-claude --plugin-dir <path-to-kinetic>
+git clone git@github.com:apoema-ai/kinetic.git ~/code/kinetic
 ```
+
+Then install for your harness. Claude Code, via the repo's plugin marketplace (`.claude-plugin/marketplace.json`):
+
+```
+~/code/kinetic/bin/kinetic install --harness claude
+claude plugin marketplace add apoema-ai/kinetic
+claude plugin install kinetic@kinetic
+```
+
+or, without the marketplace, load the checkout directly:
+
+```
+~/code/kinetic/bin/kinetic install --harness claude
+claude --plugin-dir ~/code/kinetic
+```
+
+Codex CLI, OpenCode and Devin have no kinetic marketplace; their installers below generate everything from the checkout.
 
 Devin CLI:
 
 ```
-<path-to-kinetic>/bin/kinetic install --harness devin
+~/code/kinetic/bin/kinetic install --harness devin
 ```
 
 Codex CLI:
 
 ```
-<path-to-kinetic>/bin/kinetic install --harness codex
+~/code/kinetic/bin/kinetic install --harness codex
 ```
 
 OpenCode:
 
 ```
-<path-to-kinetic>/bin/kinetic install --harness opencode
+~/code/kinetic/bin/kinetic install --harness opencode
 ```
 
 `kinetic install` links `kinetic` onto your PATH (`~/.local/bin` — make sure that directory is on your PATH), records the harness and clone in `~/.config/kinetic/settings.json`, and writes an install manifest that `doctor` checks for staleness. Re-run it after `git pull`; `kinetic install --harness <h> --uninstall` removes everything it wrote. On Claude Code, plugin registration itself (`claude --plugin-dir`) stays manual; on Devin CLI the installer runs `devin plugins install --local <clone>` itself (skills appear as `/kinetic:<name>`) and writes Devin-format hooks into `~/.config/devin/config.json`, preserving any foreign entries. Devin support is unverified until the manual checklist in `docs/smoke/devin.md` has been run (it also settles whether Devin double-registers the clone's `hooks/hooks.json`).
