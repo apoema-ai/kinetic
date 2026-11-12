@@ -12,6 +12,13 @@ try:
 except Exception:  # PreToolUse hooks fail closed via run(); others stay silent
     state = None
 
+# The harness this hook invocation serves, selected by --harness (default claude,
+# so existing hook commands keep working unchanged). Set by run() before fn runs.
+_HARNESS = "claude"
+# Mirrors kinetic.harness.HARNESS_IDS; used only when the kinetic package cannot
+# be imported (e.g. hooks copied to a bare directory), where state is None anyway.
+_KNOWN_HARNESSES = ("claude", "devin", "codex", "opencode")
+
 
 def read_input() -> dict:
     try:
@@ -19,6 +26,88 @@ def read_input() -> dict:
     except ValueError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _harness(argv=None) -> str:
+    """Resolve --harness <id> from argv (manual parse: argparse would exit(2) on
+    bad input, and a hook must never exit non-zero). Default claude; unknown ids
+    warn on stderr and fall back to claude."""
+    global _HARNESS
+    args = list(sys.argv[1:] if argv is None else argv)
+    hid = "claude"
+    i = 0
+    while i < len(args):
+        if args[i] == "--harness" and i + 1 < len(args):
+            hid, i = args[i + 1], i + 2
+            continue
+        if args[i].startswith("--harness="):
+            hid = args[i].split("=", 1)[1]
+        i += 1
+    try:
+        from kinetic import harness as profiles
+        hid = profiles.profile(hid)["id"]  # validates against the profile table
+    except Exception:
+        if hid not in _KNOWN_HARNESSES:
+            print(f"kinetic hook: unknown --harness '{hid}'; treating payload as claude",
+                  file=sys.stderr)
+            hid = "claude"
+    _HARNESS = hid
+    return hid
+
+
+def _tool_aliases(harness: str) -> dict:
+    """Map a harness's tool names onto the Claude names the hook logic reads
+    ("Bash" for shell, "Write" for file edits). Built from the harness profile;
+    claude needs no mapping and is never normalised."""
+    try:
+        from kinetic import harness as profiles
+        tools = profiles.profile(harness)["tools"]
+    except Exception:
+        return {}
+    aliases = {}
+    if tools.get("shell"):
+        aliases[tools["shell"]] = "Bash"
+    for name in tools.get("edit") or []:
+        aliases[name] = "Write"
+    return aliases
+
+
+def _norm_devin(inp: dict) -> dict:
+    """Normalise a Devin CLI hook payload into the Claude shape the hooks read.
+
+    Devin sends {hook_event_name, tool_name, tool_input, session_id, prompt_id}
+    with no cwd — DEVIN_PROJECT_DIR carries the project root. Tool names differ
+    (exec, edit, write); they are mapped through the harness profile. File tools
+    may spell the path differently; canonicalise to file_path."""
+    out = dict(inp)
+    raw_ti = inp.get("tool_input")
+    ti = dict(raw_ti) if isinstance(raw_ti, dict) else {}
+    if not ti.get("file_path"):
+        for key in ("path", "filePath", "target_path", "file"):
+            if ti.get(key):
+                ti["file_path"] = ti[key]
+                break
+    out["tool_input"] = ti
+    name = out.get("tool_name")
+    alias = _tool_aliases("devin").get(name)
+    if alias:
+        out["tool_name"] = alias
+    if not out.get("cwd"):
+        proj = os.environ.get("DEVIN_PROJECT_DIR")
+        if proj:
+            out["cwd"] = proj
+    return out
+
+
+# Per-harness input normalisers. claude (and, until their tickets land, codex
+# and opencode) pass through untouched: their payloads already are, or will be
+# forwarded in, today's shape. Codex adds apply_patch header parsing here.
+_NORMALIZERS = {"devin": _norm_devin}
+
+
+def _normalize(inp: dict, harness: str) -> dict:
+    normalizer = _NORMALIZERS.get(harness)
+    return normalizer(inp) if normalizer else inp
 
 
 def pointer_run_dir():
@@ -61,16 +150,45 @@ def abs_path(path: str, cwd) -> str:
     return path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path)
 
 
+def _pre_tool_devin(decision: str, reason: str) -> None:
+    if decision == "deny":
+        # Devin's documented PreToolUse shape is a top-level decision; the
+        # hookSpecificOutput copy covers Claude-format hook parsing (kinetic
+        # installs on Devin as a Claude-format plugin, and top-level
+        # decision:"block" also maps to deny there).
+        print(json.dumps({
+            "decision": "block", "reason": reason,
+            "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                   "permissionDecision": "deny",
+                                   "permissionDecisionReason": reason}}))
+    else:
+        # Devin has no "ask" decision (only approve/block). Emit the
+        # Claude-format ask so a Claude-compatible parser prompts the user;
+        # otherwise Devin's own permission flow decides, which prompts for
+        # writes and exec in its default modes. Never emit decision:"approve".
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "ask",
+            "permissionDecisionReason": reason}}))
+
+
 def pre_tool(decision: str, reason: str) -> None:
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse", "permissionDecision": decision,
-        "permissionDecisionReason": reason}}))
+    if _HARNESS == "devin":
+        _pre_tool_devin(decision, reason)
+    else:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": decision,
+            "permissionDecisionReason": reason}}))
 
 
 def run(fn, fail_closed: bool = False) -> None:
-    """Run fn(input); never raise. fail_closed hooks ask when they cannot decide."""
+    """Run fn(input); never raise. fail_closed hooks ask when they cannot decide.
+
+    --harness <id> selects the payload normaliser and the output shape; absent
+    it defaults to claude so today's hook commands are unchanged.
+    """
+    harness = _harness()
     try:
-        fn(read_input())
+        fn(_normalize(read_input(), harness))
     except Exception as e:  # noqa: BLE001 - a hook must never crash a tool call
         if fail_closed:
             pre_tool("ask", f"kinetic hook could not decide ({type(e).__name__}); confirm manually")
