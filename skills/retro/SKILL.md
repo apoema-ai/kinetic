@@ -8,7 +8,7 @@ model: sonnet
 
 Conduct a **retrospective** on the run. You are suggesting improvements to the coding agent's **environment** to improve future runs, and drafting the operational docs the run owes. This skill never invokes another skill.
 
-The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`). Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
+The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`). Run scripts as `kinetic <module> ...`.
 
 ## Writing style for steering files
 
@@ -16,7 +16,7 @@ Anything you propose to put in a steering file (the repo's instruction file, see
 
 ## Steps
 
-1. Read the primary sources: `python3 -m kinetic.state load --run <dir>` (tickets, rulings, verify results, gates), `<run_dir>/reports/`, the spec, and the session logs on this machine if the user points at them. Default to the current session.
+1. Read the primary sources: `kinetic state load --run <dir>` (tickets, rulings, verify results, gates), `<run_dir>/reports/`, the spec, and the session logs on this machine if the user points at them. Default to the current session.
 
 2. Look for candidates for improvement in these categories.
 
@@ -32,7 +32,7 @@ Anything you propose to put in a steering file (the repo's instruction file, see
 
 4. Draft the run's operational docs under `<run_dir>/docs/` (create the directory):
 
-- `<run_dir>/docs/runbook.md`: for operators of what shipped. Sections: what changed and where (repos, PRs), how to verify it is healthy, configuration and feature flags, rollout and rollback order (use `python3 -m kinetic.gitops merge-order --run <dir>`), known failure modes and what to do, who to ask.
+- `<run_dir>/docs/runbook.md`: for operators of what shipped. Sections: what changed and where (repos, PRs), how to verify it is healthy, configuration and feature flags, rollout and rollback order (use `kinetic gitops merge-order --run <dir>`), known failure modes and what to do, who to ask.
 - `<run_dir>/docs/release-notes.md`: for consumers. Group by slice; describe user-visible behavior in `<run_dir>/docs/GLOSSARY.md` language; call out breaking changes, migrations and required pins or version bumps.
 
 Source facts from the spec, ticket reports and PRs, not from memory. Mark anything you could not verify as "unverified" instead of stating it as fact. These are drafts for the user to review.
@@ -52,7 +52,7 @@ All work goes through two stages. The implementation agent has the most **contex
 
 ### Files
 
-- Instruction file (the steering file retro's proposals target): the first file in the harness profile's instruction list that exists in the repo. `python3 -m kinetic.harness` prints the list under `Instruction files:` in the order the harness reads them — Claude Code: `CLAUDE.md` then `AGENTS.md`; Codex, OpenCode and Devin: `AGENTS.md` first (`CLAUDE.md` second where listed). Check per repo; propose edits to that file only. It is pushed to the context window of any agent in the repo: use incredibly sparingly, usually only for **navigation pointers** to other files.
+- Instruction file (the steering file retro's proposals target): the first file in the harness profile's instruction list that exists in the repo. `kinetic harness` prints the list under `Instruction files:` in the order the harness reads them — Claude Code: `CLAUDE.md` then `AGENTS.md`; Codex, OpenCode and Devin: `AGENTS.md` first (`CLAUDE.md` second where listed). Check per repo; propose edits to that file only. It is pushed to the context window of any agent in the repo: use incredibly sparingly, usually only for **navigation pointers** to other files.
 - `CODING_STANDARDS.md`: read during review, not implementation. Add **navigation pointers** to docs folders if it grows past about 1,000 lines.
 - Docs: reference files pointed to by other files. Look for existing docs before writing new ones.
 - Skills: for docs (their description enters the agent's context window) or user-invoked commands.

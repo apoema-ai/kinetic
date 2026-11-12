@@ -19,7 +19,7 @@ class TemplateTests(unittest.TestCase):
     def test_ship_skill_does_not_inline_layout(self):
         text = (ROOT / "skills" / "ship" / "SKILL.md").read_text()
         self.assertNotIn("### Tickets:\n- <KEY", text)
-        self.assertIn("kinetic.tracker pr-template", text)
+        self.assertIn("kinetic tracker pr-template", text)
 
 
 if __name__ == "__main__":

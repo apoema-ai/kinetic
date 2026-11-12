@@ -9,13 +9,13 @@ argument-hint: "<ticket-ref|idea|spec-path> [--from build]"
 
 # Kinetic run
 
-You are the orchestrator. Only you set phases, record gates and dispatch agents. Phase skills are loaded by reading their file and following it: "read and follow `skills/<name>/SKILL.md`" (under `${CLAUDE_PLUGIN_ROOT}`), passing `Run: <run_dir>`. These phase skills run inline on your model; `model:` in their frontmatter is not applied.
+You are the orchestrator. Only you set phases, record gates and dispatch agents. Phase skills are loaded by reading their file and following it: "read and follow `<clone>/skills/<name>/SKILL.md`" where `<clone>` is the path `kinetic root` prints, passing `Run: <run_dir>`. These phase skills run inline on your model; `model:` in their frontmatter is not applied.
 
-Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
+Run kinetic commands as `kinetic <module> ...` (`kinetic` is on PATH; `kinetic root` prints the clone root for reading files inside it).
 
-Plugin root: `${CLAUDE_PLUGIN_ROOT}` is expanded in this file only. A phase skill or guide you read reaches you with `${CLAUDE_PLUGIN_ROOT}` unexpanded: substitute this file's plugin root for it as you follow them. Agents get no expansion at all: every agent brief carries a literal absolute `Scripts: <plugin-root>/scripts` line (see `build-loop.md`). Never edit `state.json` by hand and never read code or full diffs yourself: scripts emit JSON, agents write reports, you read report headers.
+Clone root: run `kinetic root` once to get the clone's absolute path. Skill, guide, agent and tracker-adapter files are named relative to it (`skills/<name>/SKILL.md`, `skills/run/guides/`, `trackers/<name>.md`, `templates/`); substitute that path as you read them. Agents run the same `kinetic <module>` commands — `kinetic` is on their PATH too. Never edit `state.json` by hand and never read code or full diffs yourself: scripts emit JSON, agents write reports, you read report headers.
 
-Guides (read each at the point named, under `${CLAUDE_PLUGIN_ROOT}/skills/run/guides/`):
+Guides (read each at the point named, under `<clone>/skills/run/guides/`):
 
 - `lanes.md`: pick the lane and the entry phase.
 - `gates.md`: the three approval gates.
@@ -24,9 +24,9 @@ Guides (read each at the point named, under `${CLAUDE_PLUGIN_ROOT}/skills/run/gu
 
 ## 1. Preflight
 
-1. Run `python3 -m kinetic.harness` and tell the user which guarantees it lists as Instructed on the active harness — those hold only through skill text, so the user knows what to watch.
-2. Read `~/.config/kinetic/repos.json` and run `python3 -m kinetic.doctor --repo NAME=PATH` once per entry with a `path` (all in one call). Show warns with their fix (missing reused skills have fallbacks, see `build-loop.md`). Stop on any fail. If there is no repos.json, tell the user to run `/kinetic:init` and stop.
-3. Read `~/.config/kinetic/settings.json` for `workspace_root` (default `~/workspace/kinetic-runs`), then resolve the tracker once with `python3 -m kinetic.tracker resolve` and read the adapter file it names; every tracker operation in a run follows that adapter.
+1. Run `kinetic harness` and tell the user which guarantees it lists as Instructed on the active harness — those hold only through skill text, so the user knows what to watch.
+2. Read `~/.config/kinetic/repos.json` and run `kinetic doctor --repo NAME=PATH` once per entry with a `path` (all in one call). Show warns with their fix (missing reused skills have fallbacks, see `build-loop.md`). Stop on any fail. If there is no repos.json, tell the user to run `/kinetic:init` and stop.
+3. Read `~/.config/kinetic/settings.json` for `workspace_root` (default `~/workspace/kinetic-runs`), then resolve the tracker once with `kinetic tracker resolve` and read the adapter file it names; every tracker operation in a run follows that adapter.
 4. If `~/.config/kinetic/active-run` exists and points at a run directory containing `state.json`, read `guides/recovery.md` and follow it instead of initialising. Never pass `--force` to `state init` unless the user explicitly asks to restart.
 5. Otherwise the run dir is `<workspace_root>/<run-id>/`, run-id = the ticket reference, or a kebab slug of the idea plus the date (`<slug>-YYYY-MM-DD`). For a spec path, slug its file name.
 
@@ -35,14 +35,14 @@ Guides (read each at the point named, under `${CLAUDE_PLUGIN_ROOT}/skills/run/gu
 Read `guides/lanes.md`, pick the lane and entry phase, then:
 
 ```
-python3 -m kinetic.state init --run <run_dir> --lane <lane> --ref "<ref>"
+kinetic state init --run <run_dir> --lane <lane> --ref "<ref>"
 ```
 
 Write the pointer: `printf '%s' <run_dir> | tee ~/.config/kinetic/active-run` (the directory `~/.config/kinetic/` already exists after init).
 
 ## 3. Phases
 
-Set each with `python3 -m kinetic.state set-phase --run <run_dir> --phase <phase>` just before starting it. Order: intake, grill, spec, tickets, build, review, ship, retro, done. Skip the phases the lane skips (`lanes.md`).
+Set each with `kinetic state set-phase --run <run_dir> --phase <phase>` just before starting it. Order: intake, grill, spec, tickets, build, review, ship, retro, done. Skip the phases the lane skips (`lanes.md`).
 
 | Phase | Do |
 |---|---|
@@ -62,4 +62,4 @@ A rejected gate returns to the previous phase skill, never forward. Deploy is ho
 - Human tickets are never dispatched: each round print `waiting_on_you`, and stop when `only_human_left` while agent tickets remain un-merged (see `build-loop.md`); once every agent ticket is merged the loop ends and open human tickets go on to review and ship.
 - Never dispatch an agent from inside an agent; you are the only dispatcher.
 - A reused skill that is missing: use the fallback named in the guide, or ask the user. Never fail silently.
-- Record every user decision that changes scope with `python3 -m kinetic.state add-ruling --run <run_dir> --what ... --why ... --cost ...`.
+- Record every user decision that changes scope with `kinetic state add-ruling --run <run_dir> --what ... --why ... --cost ...`.

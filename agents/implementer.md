@@ -16,7 +16,6 @@ You implement one ticket in one worktree, then report. The `tdd` skill is preloa
 The orchestrator gives you these lines. If any is missing, report BLOCKED.
 
 - `Run: <run_dir>`
-- `Scripts: <absolute path to the plugin scripts directory>`
 - `Docs: <run_dir>/docs` (glossary and ADR drafts from the grill phase; may not exist)
 - `Ticket: <id>`
 - `Repo: <worktree>` (also gives `Repo name:` if it differs from the directory name)
@@ -50,7 +49,7 @@ Only: your ticket, the spec sections the ticket points to, `GLOSSARY.md` and ADR
    - Names: they say what things do, in the glossary's terms.
 4. Last step, after your final edit, run verify:
 
-   `PYTHONPATH="<Scripts>" python3 -m kinetic.verify --run <run_dir> --repo-name <name> --repo-path <worktree> --ticket <id>`
+   `kinetic verify --run <run_dir> --repo-name <name> --repo-path <worktree> --ticket <id>`
 
    It prints JSON with the exit code and log path. If you edit anything after verify, re-run it: the orchestrator cannot mark the ticket done while its worktree has edits newer than its last passing verify.
 5. A non-zero verify means the status cannot be DONE. Find the root cause before changing code: read the full failure, reproduce it with the narrowest test, form one hypothesis, test it with one change, and repeat. Never stack guesses, and never weaken or delete a test to make it pass. After 3 failed hypotheses, report BLOCKED with the log path and what you ruled out.

@@ -8,9 +8,9 @@ model: sonnet
 
 Take the current conversation context and codebase understanding and produce a spec. Do NOT interview the user; synthesize what you already know. This skill never invokes another skill.
 
-The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`). Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
+The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`). Run scripts as `kinetic <module> ...`.
 
-Resolve the tracker with `python3 -m kinetic.tracker resolve` (set by `/kinetic:init`; with no tracker configured it resolves to local), read the adapter file it names, and follow its operations.
+Resolve the tracker with `kinetic tracker resolve` (set by `/kinetic:init`; with no tracker configured it resolves to local), read the adapter file it names, and follow its operations.
 
 ## Process
 
@@ -23,10 +23,10 @@ Resolve the tracker with `python3 -m kinetic.tracker resolve` (set by `/kinetic:
 4. Lint it. Write the draft to `<run_dir>/spec.md` first, then run:
 
 ```
-python3 -m kinetic.spec_lint <run_dir>/spec.md
+kinetic spec_lint <run_dir>/spec.md
 ```
 
-(same `PYTHONPATH` prefix). It prints a JSON list of problems. Fix the spec and re-run until the list is empty (`[]`).
+It prints a JSON list of problems. Fix the spec and re-run until the list is empty (`[]`).
 
 5. Publish:
    - **Tracker with remote issues**: follow the adapter's "create slice parent" operation with the spec body, and note the ticket reference at the top of `<run_dir>/spec.md`.

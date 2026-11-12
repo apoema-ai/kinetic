@@ -8,9 +8,9 @@ model: sonnet
 
 Break the spec into **slices** (tracer-bullet vertical slices, each a parent ticket) and, per slice, one **child ticket per repo** it touches. The child ticket is the unit an agent implements; the slice stays the unit you demo and verify. This skill never invokes another skill.
 
-The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`), the spec location and the list of repos in play. Run scripts as `PYTHONPATH="${CLAUDE_PLUGIN_ROOT}/scripts" python3 -m kinetic.<module> ...`.
+The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`), the spec location and the list of repos in play. Run scripts as `kinetic <module> ...`.
 
-Resolve the tracker with `python3 -m kinetic.tracker resolve` (set by `/kinetic:init`; with no tracker configured it resolves to local), read the adapter file it names, and follow its operations by name ("create slice parent", "create child", "link blocker", "link after", "link ships-with", "link related", "set kind", "assign to user", "fetch", ...). Tracker-specific names come from the resolve output: `names.kind.human`, `names.edge.<type>`, `names.after`, `names.ships_with`, `names.related`. Do not hard-code them.
+Resolve the tracker with `kinetic tracker resolve` (set by `/kinetic:init`; with no tracker configured it resolves to local), read the adapter file it names, and follow its operations by name ("create slice parent", "create child", "link blocker", "link after", "link ships-with", "link related", "set kind", "assign to user", "fetch", ...). Tracker-specific names come from the resolve output: `names.kind.human`, `names.edge.<type>`, `names.after`, `names.ships_with`, `names.related`. Do not hard-code them.
 
 ## Process
 
@@ -87,28 +87,28 @@ Ids: a ticket id is the adapter's ticket reference for a remote tracker and `NN-
 First record the approved slice ids, before any child ticket, so `graph validate`'s slice check is live:
 
 ```
-python3 -m kinetic.state set-slices --run <dir> --slices '["<slice-id>","<slice-id>"]'
+kinetic state set-slices --run <dir> --slices '["<slice-id>","<slice-id>"]'
 ```
 
 Then, for every child ticket (`blocked_by` is a JSON list of `{"id","type"}`; use `[]` when none):
 
 ```
-python3 -m kinetic.state set-ticket --run <dir> --id <ticket-id> --field repo=<repo> --field slice=<slice-id> --field 'blocked_by=[{"id":"<blocker-id>","type":"snapshot"}]' --field 'produces=["<name>"]' --field 'consumes=["<name>"]'
+kinetic state set-ticket --run <dir> --id <ticket-id> --field repo=<repo> --field slice=<slice-id> --field 'blocked_by=[{"id":"<blocker-id>","type":"snapshot"}]' --field 'produces=["<name>"]' --field 'consumes=["<name>"]'
 ```
 
 Omit `produces` or `consumes` when the ticket has none. Add the new fields where they apply: `--field kind=human` (human ticket; leave out `repo` when it has none), `--field 'after=["<id>"]'`, `--field ships_with=<group>`, `--field 'related=["<id>"]'`.
 
-In local mode, after writing each ticket file run `python3 -m kinetic.board header --run <dir> --id <ticket-id>` so its header matches state, and when all files are written `python3 -m kinetic.board render --run <dir>`. Do this before anything reads `board drift`: a hand-written file shows drift until its first `header`.
+In local mode, after writing each ticket file run `kinetic board header --run <dir> --id <ticket-id>` so its header matches state, and when all files are written `kinetic board render --run <dir>`. Do this before anything reads `board drift`: a hand-written file shows drift until its first `header`.
 
 Every slice id passed to `set-slices` must appear in at least one ticket's `slice` field. Do not edit `state.json` by hand.
 
 ### 6. Validate
 
 ```
-python3 -m kinetic.graph validate --run <dir>
+kinetic graph validate --run <dir>
 ```
 
-It prints `{"errors": [...], "warnings": [...]}` and exits non-zero on errors (missing repo, unknown blocker, invalid edge type, cycle, a consumer with no edge to the ticket producing what it consumes). Warnings name interfaces that no ticket produces: confirm each already exists in the code, or add the missing ticket. Fix the tickets (re-run `set-ticket` and update the tracker) and re-run until `errors` is empty. Then print the build order with `python3 -m kinetic.graph topo --run <dir>`.
+It prints `{"errors": [...], "warnings": [...]}` and exits non-zero on errors (missing repo, unknown blocker, invalid edge type, cycle, a consumer with no edge to the ticket producing what it consumes). Warnings name interfaces that no ticket produces: confirm each already exists in the code, or add the missing ticket. Fix the tickets (re-run `set-ticket` and update the tracker) and re-run until `errors` is empty. Then print the build order with `kinetic graph topo --run <dir>`.
 
 The orchestrator runs the breakdown approval gate; do not set phases or gates here.
 

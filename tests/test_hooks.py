@@ -118,7 +118,7 @@ class StopGate(HookCase):
         out = self.hook("completion_gate", {"stop_hook_active": False})
         self.assertEqual(out["decision"], "block")
         self.assertIn("api", out["reason"])
-        self.assertIn("kinetic.verify", out["reason"])
+        self.assertIn("kinetic verify", out["reason"])
 
     def test_stop_allows_after_passing_verify(self):
         self.activate()
@@ -471,7 +471,7 @@ class DevinHooks(HookCase):
                           "session_id": "s1", "prompt_id": "p1",
                           "last_assistant_message": "done"}, cwd=self.home)
         self.assertEqual(out["decision"], "block")
-        self.assertIn("kinetic.verify", out["reason"])
+        self.assertIn("kinetic verify", out["reason"])
 
     def test_orient_injects_context_for_session_start(self):
         self.activate()

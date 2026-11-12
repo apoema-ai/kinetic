@@ -34,7 +34,7 @@ def propose(repo_path) -> dict:
 def main(argv=None) -> int:
     paths = sys.argv[1:] if argv is None else argv
     if not paths:
-        print("usage: python3 -m kinetic.detect_repos PATH [PATH ...]", file=sys.stderr)
+        print("usage: kinetic detect_repos PATH [PATH ...]", file=sys.stderr)
         return 2
     print(json.dumps({p: propose(p) for p in paths}))
     return 0

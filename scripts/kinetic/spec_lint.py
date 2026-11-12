@@ -26,7 +26,7 @@ def lint(markdown: str) -> list[str]:
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:
-        print("usage: python3 -m kinetic.spec_lint <spec-file>", file=sys.stderr)
+        print("usage: kinetic spec_lint <spec-file>", file=sys.stderr)
         return 2
     try:
         with open(args[0]) as fh:
