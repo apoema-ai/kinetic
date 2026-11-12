@@ -3,6 +3,7 @@ name: init
 description: Interactive one-time setup for kinetic. Registers repos, detects verify commands, picks the tracker and its names, writes the user-level config, then runs doctor. Safe to re-run.
 model: sonnet
 disable-model-invocation: true
+triggers: [user]
 argument-hint: "[repo-path ...]"
 ---
 

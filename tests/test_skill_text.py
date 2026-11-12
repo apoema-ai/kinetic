@@ -7,6 +7,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FORBIDDEN = ("jira mode", "Jira key:", "getJiraIssue")
 
+# Harness-neutral text (spec Testing Decisions): no skill or agent names a
+# Claude-only tool. ${CLAUDE_PLUGIN_ROOT} is deliberately absent here: the
+# launcher sweep owns those invocation lines and is still in flight.
+CLAUDE_ONLY_TOOLS = ("AskUserQuestion", "SendMessage", "run_in_background")
+
+# No skill or agent body names a concrete model; model: stays in frontmatter
+# as the Claude/Devin default.
+CONCRETE_MODEL = re.compile(r"\b(sonnet|opus|haiku|gpt-[\w.-]+|claude-[\w.-]+)\b")
+
+# The five user-only skills carry both invocation keys; no other skill may
+# carry triggers: (doctor keeps only disable-model-invocation, per rulings).
+USER_ONLY_SKILLS = ("ask", "implement", "init", "run", "status")
+
 # Spec model tiers: implementer and fix-reviewer are standard; the reviewers and
 # implementer-strong are strong. model: stays as the Claude/Devin default
 # (sonnet for standard, opus for strong).
@@ -88,6 +101,40 @@ class SkillTextTest(unittest.TestCase):
             model = re.search(r"^model:\s*(\S+)\s*$", fm, re.M)
             self.assertIsNotNone(model, f"{p.name}: no model: default")
             self.assertEqual(model.group(1), TIER_MODELS[tier.group(1)], p.name)
+
+    def test_no_claude_only_tools(self):
+        bad = []
+        for p in _text_files("skills", "agents"):
+            text = p.read_text()
+            for needle in CLAUDE_ONLY_TOOLS:
+                if needle in text:
+                    bad.append("%s: %s" % (p.relative_to(ROOT), needle))
+        self.assertEqual(bad, [])
+
+    def test_no_concrete_model_in_body(self):
+        bad = []
+        for p in _text_files("skills", "agents"):
+            for m in CONCRETE_MODEL.finditer(_body(p)):
+                bad.append("%s: %s" % (p.relative_to(ROOT), m.group(0)))
+        self.assertEqual(bad, [])
+
+    def test_user_only_skills_have_both_invocation_keys(self):
+        skills = sorted((ROOT / "skills").glob("**/SKILL.md"))
+        self.assertTrue(skills)
+        for p in skills:
+            fm = _frontmatter(p)
+            self.assertIsNotNone(fm, str(p))
+            triggers = re.search(r"(?m)^triggers:", fm)
+            if p.parent.name in USER_ONLY_SKILLS:
+                self.assertIsNotNone(
+                    re.search(r"(?m)^disable-model-invocation:\s*true\s*$", fm),
+                    f"{p}: missing disable-model-invocation: true")
+                self.assertIsNotNone(
+                    re.search(r"(?m)^triggers:\s*\[user\]\s*$", fm),
+                    f"{p}: missing triggers: [user]")
+            else:
+                self.assertIsNone(
+                    triggers, f"{p}: triggers: belongs only on the user-only five")
 
     def test_implementer_strong_shares_implementer_body(self):
         self.assertEqual(

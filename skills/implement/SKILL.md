@@ -3,6 +3,7 @@ name: implement
 description: Start the build lane for a ticket that is already well specified. Checks the ref has acceptance criteria and a repo; otherwise points to /kinetic:run.
 model: sonnet
 disable-model-invocation: true
+triggers: [user]
 argument-hint: "<ticket-ref|ticket-file|spec-path>"
 ---
 
@@ -21,4 +22,4 @@ If either is missing, say which one and stop: "Not ready to build. Run `/kinetic
 
 ## Hand off
 
-Otherwise say "Starting the build lane for <ref>", then follow the instructions of the `/kinetic:run` command with `<ref> --from build`. This hand-off is the one sanctioned command-to-command call; do not use the Skill tool for it.
+Otherwise say "Starting the build lane for <ref>", then follow the instructions of the `/kinetic:run` command with `<ref> --from build`. This hand-off is the one sanctioned command-to-command call: read the run skill's SKILL.md and follow it inline rather than invoking it as a nested skill.

@@ -3,6 +3,7 @@ name: ask
 description: Router for kinetic. Prints the three lanes, the entry points, and the next command for the current run as computed by the next_step script.
 model: haiku
 disable-model-invocation: true
+triggers: [user]
 ---
 
 # Kinetic ask

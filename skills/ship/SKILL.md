@@ -16,7 +16,7 @@ The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`
 - Open PRs only as drafts. Do not merge any PR, mark one ready, or deploy.
 - Never edit a PR that existed before this run.
 - Run git and gh against an explicit repo (`git -C <repo_path>`, or from the repo path); the shell's working directory is not kept between calls.
-- Write body files under `<dir>/pr/` with the Write tool, never `/tmp`: isolation denies writes outside the run directory.
+- Write body files under `<dir>/pr/`, never `/tmp`: isolation denies writes outside the run directory.
 - No AI attribution in commits or PR bodies. No emojis.
 - The push/PR confirmation hook may prompt; that is the expected gate. A hook denial is final: report it, do not retry another way.
 
