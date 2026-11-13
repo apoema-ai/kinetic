@@ -161,6 +161,16 @@ class SkillTextTest(unittest.TestCase):
             self.assertIn(needle, text)
         self.assertNotIn("only the GitHub calls in step 4 reach the network", text)
 
+    def test_discover_reads_catalog(self):
+        text = (ROOT / "skills" / "discover" / "SKILL.md").read_text()
+        for needle in ("kinetic catalog show", "index.md", "never skips"):
+            self.assertIn(needle, text)
+
+    def test_cleanup_offers_catalog_after_report(self):
+        text = (ROOT / "skills" / "cleanup" / "SKILL.md").read_text()
+        self.assertIn("catalog-refresh", text)
+        self.assertGreater(text.index("catalog-refresh"), text.index("## 5. Report"))
+
     def test_catalog_refresh_is_approve_first(self):
         text = (ROOT / "skills" / "catalog-refresh" / "SKILL.md").read_text()
         self.assertIn("kinetic catalog apply", text)

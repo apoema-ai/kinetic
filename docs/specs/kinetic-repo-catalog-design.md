@@ -105,7 +105,7 @@ Markdown with a JSON frontmatter block (fenced by `---`), so the stdlib script c
 - enable <ASSET_CLASS> for the nightly workflow processes
 ```
 
-Strength from `seen/of`: **always** (every source), **usually** (at least half), **seen once** (one source). "What for" lines name the place in the code when the PRs show it; two or three per repo.
+Strength from `seen/of`: **seen once** (one source), else **always** (every source), else **usually** (at least half), else **sometimes**. "What for" lines name the place in the code when the PRs show it; two or three per repo.
 
 **Granularity rules:**
 
@@ -143,14 +143,14 @@ User-only. `kinetic catalog detect`; ask (harness question tool) with the recomm
 
 ### 5. Change file
 
-JSON written by the skill, read by `apply`: `{recipes: [{slug, frontmatter, body}], repos: [{repo, add_terms: {<term>: [<key>]}, owns}], terms: [{term, meaning, synonyms, avoid}], ledger: [{key, recipe, repos}]}`. `apply` merges counts itself, so the skill never rewrites a count by hand.
+JSON written by the skill, read by `apply`: `{deliverables: [{key, repos, prs, recipe}], recipes: [{slug, title, when, parameters, terms, what_for: {<repo>: [line]}}], repos: [{repo, org, owns, terms: {<term>: [<key>]}}], terms: [{term, meaning, synonyms, avoid}]}`. Each deliverable becomes a recipe source and a ledger entry; `apply` derives every count from the sources and renders the bodies, so the skill never writes a count or a body. `kinetic catalog index` re-renders bodies and `index.md` from the frontmatter after a hand edit.
 
 ### 6. `discover` (`skills/discover/SKILL.md`)
 
 Step 4 gains a first source, used when `kinetic catalog show` succeeds; local files, no permission needed:
 
 - Read `index.md`; match the run's scope (ref, grill notes, spec, glossary terms) against recipe when-to-use lines and repo terms; open the matching recipes.
-- Confidence: a recipe repo marked **always** is strong, **usually** is medium, **seen once** is weak; a terms-only match is medium at most.
+- Confidence: a recipe repo marked **always** is strong, **usually** is medium, **sometimes** and **seen once** are weak; a terms-only match is medium at most.
 - Reason line names the recipe: `recipe onboard-asset-class-warehouse-pledge: always (3 of 3)`.
 - The approved repos' what-for lines go into `discovery.md`.
 - A catalog match never skips step 6 (confirm).
@@ -170,7 +170,7 @@ After step 5 (report), when `kinetic catalog show` succeeds and at least one rep
 - Skill names `catalog-refresh` (user-chosen) and `catalog-setup`; script `kinetic catalog`.
 - `catalog_dir` lives in kinetic's `settings.json`, not `~/.claude/`.
 - JSON frontmatter in Markdown, so the stdlib can parse it.
-- Strength thresholds: always = every source, usually = at least half, seen once = one source.
+- Strength thresholds: seen once = one source; always = every source; usually = at least half; sometimes = the rest (added during planning: the first three left 2 of 5 unlabeled).
 - The batch-size question at about 20 results.
 - From `cleanup`, the catalog question comes after the report, as a separate question.
 - `cleanup` is the only skill allowed to invoke another; `discover` reads the files directly.
