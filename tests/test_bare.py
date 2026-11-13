@@ -92,8 +92,23 @@ class BareTests(unittest.TestCase):
         self.assertEqual(out[0]["remote"], str(self.tmp / "remote"))
         self.assertEqual(out[0]["default_branch"], "main")
 
-    def test_missing_bare_dir_lists_nothing(self):
+    def test_missing_bare_dir_lists_nothing_and_clone_refuses(self):
         self.assertEqual(bare.list_clones(str(self.tmp / "gone")), [])
+
+    def test_detect_keeps_hint_when_scan_fills_the_cap(self):
+        make_remote(self.tmp / "remote")
+        for i in range(6):
+            make_bare(self.tmp / "remote", self.home / "workspace" / f"c{i}" / "r")
+        hinted = self.tmp / "hinted"
+        hinted.mkdir()
+        (self.home / ".claude").mkdir()
+        (self.home / ".claude" / "bare-repos.local.md").write_text(
+            f"---\nbare_repos_dir: {hinted}\n---\n")
+        out = bare.detect(str(self.tmp), path=self.settings, home=self.home)
+        paths = [c["path"] for c in out["candidates"]]
+        self.assertIn(str(hinted), paths)
+        self.assertLessEqual(len(paths), 5)
+        self.assertEqual(out["recommendation"]["path"], str(self.home / "workspace" / "c0"))
 
     def test_detect_precedence(self):
         scanned = self.home / "workspace" / "master" / ".bare"

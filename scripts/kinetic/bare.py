@@ -148,13 +148,17 @@ def detect(cwd, path=None, home=None) -> dict:
     from_cwd = _cwd_container(Path(_real(str(cwd))))
     scanned = sorted(_scan(home).items(), key=lambda kv: (-kv[1], str(kv[0])))
     hint = _local_md_hint(home)
+    if hint:
+        seen.add(hint)  # added last, below, so the 5-candidate cap cannot drop it
     if from_cwd:
         add(str(from_cwd), "current directory belongs to a bare repo",
             len(list_clones(str(from_cwd))))
     for p, n in scanned:
         add(str(p), "existing bare repos found", n)
     if hint:
-        add(hint, LOCAL_MD_SOURCE, len(list_clones(hint)))
+        candidates = candidates[:4]
+        candidates.append({"path": hint, "source": LOCAL_MD_SOURCE,
+                           "bare_repo_count": len(list_clones(hint))})
 
     if saved:
         rec = {"path": saved, "reason": "already saved"}
