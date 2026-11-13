@@ -43,3 +43,17 @@ _Avoid_: Workspace, base dir, code folder
 **Discovery**:
 The phase that settles which repos a run touches, from sources the user approves, and cuts their integration worktrees.
 _Avoid_: Repo detection, repo lookup
+
+## Catalog
+
+**Catalog**:
+The user-set folder (`catalog_dir`) of repo profiles and recipes learned from merged work, filled by `/kinetic:catalog-refresh` and read by discovery.
+_Avoid_: Knowledge base, index
+
+**Recipe**:
+One kind of change, generalized by its parameters: its title, when to use it, and per repo what it is needed for.
+_Avoid_: Playbook, template
+
+**Deliverable**:
+A lone ticket, or an epic with all its children, cataloged as one unit.
+_Avoid_: Task, story

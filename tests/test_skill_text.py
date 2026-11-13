@@ -18,7 +18,7 @@ CONCRETE_MODEL = re.compile(r"\b(sonnet|opus|haiku|gpt-[\w.-]+|claude-[\w.-]+)\b
 
 # The user-only skills carry both invocation keys; no other skill may
 # carry triggers: (doctor keeps only disable-model-invocation, per rulings).
-USER_ONLY_SKILLS = ("ask", "bare-clone", "bare-refresh", "bare-setup", "cleanup",
+USER_ONLY_SKILLS = ("ask", "bare-clone", "bare-refresh", "bare-setup", "catalog-setup", "cleanup",
                     "implement", "init", "run", "status")
 
 # Spec model tiers: implementer and fix-reviewer are standard; the reviewers and
@@ -160,6 +160,22 @@ class SkillTextTest(unittest.TestCase):
                        "recheck with `kinetic bare list`"):
             self.assertIn(needle, text)
         self.assertNotIn("only the GitHub calls in step 4 reach the network", text)
+
+    def test_discover_reads_catalog(self):
+        text = (ROOT / "skills" / "discover" / "SKILL.md").read_text()
+        for needle in ("kinetic catalog show", "index.md", "never skips"):
+            self.assertIn(needle, text)
+
+    def test_cleanup_offers_catalog_after_report(self):
+        text = (ROOT / "skills" / "cleanup" / "SKILL.md").read_text()
+        self.assertIn("catalog-refresh", text)
+        self.assertGreater(text.index("catalog-refresh"), text.index("## 5. Report"))
+
+    def test_catalog_refresh_is_approve_first(self):
+        text = (ROOT / "skills" / "catalog-refresh" / "SKILL.md").read_text()
+        self.assertIn("kinetic catalog apply", text)
+        self.assertIn("writes nothing", text)
+        self.assertNotIn("git commit", text)
 
 
 if __name__ == "__main__":

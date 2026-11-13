@@ -44,3 +44,7 @@ Never pass `--force` to `worktree remove`: a refusal means uncommitted changes. 
 ## 5. Report
 
 List what was removed and what was kept, with the reason for each item kept. Never remove the run directory: it holds the state, reports, reviews and docs. Do not change `state.json`.
+
+## 6. Offer to catalog
+
+Only when `kinetic catalog show` exits 0 and step 2 found at least one repo whose PR is merged. Ask once, after the report: "Catalog this run's merged work?" The removals above never wait on this answer. On yes, follow `skills/catalog-refresh/SKILL.md` with `Run: <run_dir>`; it shows its own review and writes only what the user approves. On no, say it can be done later with `/kinetic:catalog-refresh --run <run_dir>`. Cleanup is the one skill that invokes another, and only this one.

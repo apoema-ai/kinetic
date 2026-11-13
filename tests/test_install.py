@@ -420,8 +420,8 @@ class InstallCodexTest(InstallCase):
     a merged ~/.codex/hooks.json. It never shells out to codex (hook trust is
     a manual /hooks step) and does not require the codex CLI on PATH."""
 
-    USER_ONLY = {"ask", "cleanup", "doctor", "implement", "init", "run", "status"}
-    SKILL_NAMES = {"ask", "cleanup", "discover", "doctor", "grill", "implement", "init", "retro",
+    USER_ONLY = {"ask", "catalog-setup", "cleanup", "doctor", "implement", "init", "run", "status"}
+    SKILL_NAMES = {"ask", "catalog-refresh", "catalog-setup", "cleanup", "discover", "doctor", "grill", "implement", "init", "retro",
                    "run", "ship", "specify", "status", "tdd", "decompose"}
     AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
                    "integration-reviewer", "spec-reviewer",
@@ -686,8 +686,8 @@ class InstallOpenCodeTest(InstallCase):
     no trust step) so nothing foreign is touched; the opencode CLI is not
     required on PATH."""
 
-    USER_ONLY = {"ask", "cleanup", "doctor", "implement", "init", "run", "status"}
-    SKILL_NAMES = {"ask", "cleanup", "discover", "doctor", "grill", "implement", "init", "retro",
+    USER_ONLY = {"ask", "catalog-setup", "cleanup", "doctor", "implement", "init", "run", "status"}
+    SKILL_NAMES = {"ask", "catalog-refresh", "catalog-setup", "cleanup", "discover", "doctor", "grill", "implement", "init", "retro",
                    "run", "ship", "specify", "status", "tdd", "decompose"}
     AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
                    "integration-reviewer", "spec-reviewer",

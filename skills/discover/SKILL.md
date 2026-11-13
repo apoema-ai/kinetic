@@ -19,7 +19,7 @@ Run scripts as `kinetic <module> ...`. Ask the user with the harness's question 
 
 Each step below is either **agent** (you work alone and ask nothing) or **you** (the user answers). On a **you** step, never answer for the user, never guess their answer, and ask every question of that step in one message.
 
-Never write `~/.config/kinetic/` files with the edit tools: the isolation hook denies them during a run. Config changes go only through `kinetic discover remember` and `kinetic discover register`. The only network calls are the step 4 GitHub calls, made with the user's permission, and fetching bare clones that match a candidate, which the saved bare folder already covers. Reading any other source sends nothing off the machine.
+Never write `~/.config/kinetic/` files with the edit tools: the isolation hook denies them during a run. Config changes go only through `kinetic discover remember` and `kinetic discover register`. The only network calls are the step 4 GitHub calls, made with the user's permission, and fetching bare clones that match a candidate, which the saved bare folder already covers. Reading any other source, the catalog included, sends nothing off the machine.
 
 ## Mode: confirm-only
 
@@ -53,6 +53,7 @@ Save the approved folders and orgs right away: `kinetic discover remember --root
 
 Search every approved source, asking nothing:
 
+- **Catalog.** Only when `kinetic catalog show` exits 0 (it prints the catalog folder). Local files: no permission needed, nothing leaves the machine. Read `<catalog>/index.md` and match the run's scope (the ref, grill notes, spec, glossary terms) against each recipe's when-to-use text and each repo's terms; open the matching `recipes/<slug>.md` files. A recipe repo marked **always** is strong, **usually** is medium, **sometimes** or **seen once** is weak; a repo matched only by its terms is medium at most. The reason line names the recipe, e.g. `recipe onboard-asset-class-warehouse-pledge: always (3 of 3)`. Keep each approved repo's what-for lines for `discovery.md`. A catalog match never skips step 6, and it never makes step 1's set clear on its own.
 - **Bare clones.** Only when `kinetic bare show` exited 0. `kinetic bare list` lists the clones with name, path, remote and `default_branch`. Match them like base folders, reading the README with `git -C <clone> show origin/<default_branch>:README.md`. For every candidate that matches a bare clone, run `kinetic bare refresh --name <n> ...` (repeat `--name`) before reading its contents; with no matching names skip the command, and never run it without `--name`, which fetches every clone in the folder. Ask nothing: the saved bare folder is the user's consent. The command prints `{"results": [{name, ok, advanced, error}]}` and exits 1 when any fetch failed. A failure does not stop this step; keep its `error` for step 6. A repo registered in `repos.json` at a normal checkout keeps that path even when a bare clone also exists; an unregistered repo found both in a base folder and in the bare folder uses the bare clone.
 - **Base folders.** `kinetic discover scan --root <path> ...` lists the git repos one level deep, with name, path, remote and whether each is registered. Match them against the ref, the grill notes, the glossary terms and the interfaces named so far, using the repo name, the first lines of its README and its remote.
 - **Other sources.** Read what the user named (files, or URLs they gave, with the harness's fetch tool) and pull out repo names.
@@ -103,7 +104,7 @@ Ask the questions of this step together, in one message, and only those that app
    A repo already in state keeps its worktree. The integration branch is never just `kinetic/<run-id>`: git cannot hold both that and `kinetic/<run-id>/<id>`.
 5. **Record.** Write or update `<run_dir>/discovery.md` with:
    - the sources used, and the ones the user declined;
-   - the approved repos with their reasons and sources;
+   - the approved repos with their reasons and sources, and, for a repo a catalog recipe matched, that recipe's what-for lines;
    - the suspected repos the user did not take;
    - each follow-up round: what was missing and what the user added.
 
