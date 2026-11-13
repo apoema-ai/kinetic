@@ -12,7 +12,7 @@ from pathlib import Path
 
 from kinetic import config, harness, install, tracker
 
-SKILLS = ["find-ticket-repos", "checkout-ticket-repos", "resolving-merge-conflicts"]
+SKILLS = ["resolving-merge-conflicts"]
 PLUGINS = ["superpowers", "dev-fleet"]
 GH_TIMEOUT = 10
 
