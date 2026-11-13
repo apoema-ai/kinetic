@@ -65,6 +65,8 @@ Iterate until the user approves.
 
 Publish in dependency order (blockers first) so edges can reference real identifiers. Do NOT close or modify the source spec issue.
 
+When the tracker adapter says it publishes staged tickets, follow the Local steps; kinetic publishes them when the breakdown gate is approved.
+
 - **Tracker with remote issues**: follow the adapter: "create slice parent" per slice, "create child" per ticket under it, "set kind" for human tickets, "assign to user" for human tickets, "link blocker" with the edge type for each blocker, and "link after" / "link ships-with" / "link related" where they apply. Use the ticket reference the adapter gives as the ticket id.
 - **Local**: write one file per child ticket at `<run_dir>/issues/NN-<repo>-<slug>.md`, numbered from `01` in dependency order. Use `NN-<repo>-<slug>` as the ticket id (a human ticket with no repo: `NN-<slug>`). One ticket per file, never a combined file. The first lines of the file are a header that `kinetic.board` owns (see step 5): write the template, then let `board header` fill it.
 

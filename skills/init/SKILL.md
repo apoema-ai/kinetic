@@ -27,7 +27,7 @@ Run this outside the session that owns the active run: in that session the isola
 3. **Confirm verify.** Ask only about repos whose `verify` is null (ask for the command) or looks unusual (confirm it). Accept the rest silently.
 3b. **Snapshots.** For each repo ask, one at a time and only if it publishes snapshot builds other repos consume: the `publish_snapshot` command (builds and publishes a snapshot) and the `pin` command (run in the downstream repo; it reads `KINETIC_UPSTREAM_REF`). Leave both unset otherwise: the decompose phase then uses `merge` edges between repos instead of `snapshot` edges.
 4. **Tracker.** Four questions, one at a time:
-   1. Which tracker: `jira`, `github`, `linear`, `local` or `other`. Recommend `jira` if the Atlassian MCP is connected, `github` if the repos are on GitHub.
+   1. Which tracker: `jira`, `github`, `linear`, `local`, `orbit` or `other`. Recommend `jira` if the Atlassian MCP is connected, `orbit` if `orbit --version` succeeds and `orbit list --json` finds a Board from the current directory, `github` if the repos are on GitHub.
    2. That tracker's required settings (read its adapter, `trackers/<name>.md`). For `other`, also ask for a short description of the tracker and how to reach it; it is written as top-level `tracker_description`, which resolve requires.
    3. "Keep the default names?" (recommend yes). On no, collect overrides for the kind, edge and status names.
    4. "Use the default PR template?" (recommend yes). On no, ask the template's path.

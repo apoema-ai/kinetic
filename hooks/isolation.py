@@ -6,7 +6,7 @@ import _common
 
 
 def main(inp):
-    found = _common.active_run(inp)
+    found = _common.active_run(inp, tickets=False)
     ti = inp.get("tool_input") or {}
     paths = _common.tool_paths(ti)
     if not found or (not paths and ti.get("file_paths") is None):

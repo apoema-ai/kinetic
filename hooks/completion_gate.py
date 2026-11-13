@@ -6,8 +6,16 @@ import _common
 
 
 def main(inp):
-    found = _common.active_run(inp)
-    if inp.get("stop_hook_active") or not found:
+    if inp.get("stop_hook_active"):
+        return
+    try:
+        found = _common.active_run(inp)
+    except _common.state.ticket_store.TicketStoreError as e:
+        # the gate cannot check verify freshness without tickets: block, never pass silently
+        print(json.dumps({"decision": "block", "reason":
+            f"kinetic could not read the run's tickets ({e}); fix it, then stop again"}))
+        return
+    if not found:
         return
     run_dir, st = found
     # the stale-verify rule lives in state.stale_verify — the same rule

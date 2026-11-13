@@ -35,6 +35,17 @@ class StatusTest(unittest.TestCase):
         self.assertIn("| A-1 | agent | api | done | — |", out)
         self.assertIn("| B-2 | agent | web | todo | A-1 (merge), C (snapshot) |", out)
 
+    def test_stuck_ticket_is_reported(self):
+        stuck = dict(t("api", "running"), liveness="stuck")
+        alive = dict(t("web", "running"), liveness="alive")
+        out = status.render(S({"A": stuck, "B": alive}))
+        self.assertIn("implementer may be stuck: A", out)
+        self.assertNotIn("stuck: B", out)
+
+    def test_local_status_unchanged(self):
+        out = status.render(S({"A": t("api", "running")}))
+        self.assertNotIn("stuck", out)
+
     def test_render_ready_line(self):
         out = status.render(S({"A": t("api")}))
         self.assertIn("Ready: A", out)

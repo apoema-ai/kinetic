@@ -154,3 +154,19 @@ class SkillTextTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrbitSkillTextTest(unittest.TestCase):
+    def test_decompose_has_generic_publish_sentence(self):
+        text = (ROOT / "skills/decompose/SKILL.md").read_text()
+        self.assertIn("When the tracker adapter says it publishes staged tickets, follow the Local steps; "
+                      "kinetic publishes them when the breakdown gate is approved.", text)
+        self.assertNotIn("orbit", text.lower())
+
+    def test_run_skill_records_the_ticket_store(self):
+        text = (ROOT / "skills/run/SKILL.md").read_text()
+        self.assertIn('--ticket-store "$(kinetic tracker store-record)"', text)
+
+    def test_init_skill_offers_orbit(self):
+        text = (ROOT / "skills/init/SKILL.md").read_text()
+        self.assertIn("`orbit`", text)

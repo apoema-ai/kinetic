@@ -948,5 +948,118 @@ class RecordEditAndOrient(HookCase):
             self.assertIn("--harness claude", c)
 
 
+
+
+class TouchTicketTest(HookCase):
+    """_common.touch_ticket in-process, with the run's ticket store faked."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        sys.path.insert(0, str(HOOKS))
+        import _common
+        self._common = _common
+        self.activate()
+        self.wt = Path(os.path.realpath(self.tmp.name)) / "wt-a"
+        (self.wt / "src").mkdir(parents=True)
+        (self.wt / ".git").write_text("gitdir: elsewhere\n")  # a git worktree
+        state.set_ticket(self.run_dir, "01-api-a", repo="api", status="running",
+                         worktree=str(self.wt))
+        self.touched = []
+
+        class FakeStore:
+            def touch(store, run_dir, st, ticket_id):
+                if getattr(self, "touch_error", None):
+                    raise self.touch_error
+                self.touched.append(ticket_id)
+
+        patches = [mock.patch.dict(os.environ, HOME=str(self.home)),
+                   mock.patch("kinetic.ticket_store.for_state", return_value=FakeStore())]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def payload(self, cwd):
+        return {"hook_event_name": "PostToolUse", "tool_name": "Bash", "cwd": str(cwd),
+                "tool_input": {"command": "pytest"}}
+
+    def test_touch_throttled(self):
+        self._common.touch_ticket(self.payload(self.wt))
+        self._common.touch_ticket(self.payload(self.wt / "src"))
+        self.assertEqual(self.touched, ["01-api-a"])
+        for stamp in (self.run_dir / "touch").iterdir():
+            old = stamp.stat().st_mtime - 301
+            os.utime(stamp, (old, old))
+        self._common.touch_ticket(self.payload(self.wt))
+        self.assertEqual(self.touched, ["01-api-a", "01-api-a"])
+
+    def test_touch_failure_is_silent(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        import io
+        self.touch_error = RuntimeError("orbit down")
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            self._common.touch_ticket(self.payload(self.wt))
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("touch failed", err.getvalue())
+
+    def test_touch_outside_worktree_does_nothing(self):
+        self._common.touch_ticket(self.payload(self.repo))
+        self.assertEqual(self.touched, [])
+
+
+class TouchHookWiringTest(HookCase):
+    def test_record_edit_and_claim_run_call_touch(self):
+        for name in ("record_edit", "claim_run"):
+            text = (HOOKS / f"{name}.py").read_text()
+            self.assertIn("_common.touch_ticket(inp)", text, name)
+
+
+class UnreachableStoreHookTest(HookCase):
+    """A run whose ticket store cannot be read: hooks must not weaken gates."""
+
+    def activate_broken(self):
+        record = {"kind": "orbit", "config": {"anchor": str(self.tmp.name) + "/no-board",
+                                              "names": {"run": "kinetic-run-<run id>"},
+                                              "published": True}}
+        state.init(self.run_dir, "feature", "X-1", ticket_store_record=record)
+        raw = json.loads((self.run_dir / "state.json").read_text())
+        raw["repos"] = {"api": {"path": str(self.repo), "integration_branch": "main"}}
+        raw["gates"] = {"breakdown": {"approved": True, "granted_at": T1, "at": T1}}
+        (self.run_dir / "state.json").write_text(json.dumps(raw))
+        ptr = self.home / ".config" / "kinetic"
+        ptr.mkdir(parents=True)
+        (ptr / "active-run").write_text(str(self.run_dir))
+
+    def env(self):
+        return {"PATH": "/usr/bin:/bin"}  # no orbit binary
+
+    def test_isolation_does_not_need_tickets(self):
+        self.activate_broken()
+        out = self.hook("isolation", {"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                      "tool_input": {"file_path": str(self.repo / "a.py")},
+                                      "cwd": str(self.repo)}, env=self.env())
+        self.assertNotEqual(self.decision(out), "ask")
+
+    def test_unattributed_edit_refuses_an_older_verify(self):
+        self.activate_broken()
+        self.hook("record_edit", {"hook_event_name": "PostToolUse", "tool_name": "Write",
+                                  "tool_input": {"file_path": str(self.repo / "a.py")},
+                                  "cwd": str(self.repo)}, env=self.env())
+        raw = json.loads((self.run_dir / "state.json").read_text())
+        self.assertTrue(raw.get("unattributed_edit_at"))
+        raw["verify"] = {"orb-a.b": {"exit_code": 0, "at": T1, "repo": "api", "log_path": "x"}}
+        raw["unattributed_edit_at"] = T2
+        reason = state.done_refusal(dict(raw, tickets={"orb-a.b": {"repo": "api"}}), "orb-a.b")
+        self.assertIn("could not be attributed", reason or "")
+
+    def test_stop_gate_blocks_when_tickets_cannot_be_read(self):
+        self.activate_broken()
+        out = self.hook("completion_gate", {"hook_event_name": "Stop", "cwd": str(self.repo)},
+                        env=self.env())
+        self.assertEqual((out or {}).get("decision"), "block")
+        self.assertIn("could not read the run's tickets", out["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()

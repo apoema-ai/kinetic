@@ -326,6 +326,7 @@ The tracker is where tickets live. Pick it once in `~/.config/kinetic/settings.j
 | `github` | `gh` | `github_repo` |
 | `linear` | a Linear MCP server | `linear_team` |
 | `local` (the default) | nothing | none |
+| `orbit` | `orbit` with Batches and Annotations (0.11.0 or later) | none; optional `orbit_dir` |
 | `other` | whatever you describe | `tracker_description` |
 
 Each tracker is one prose file, `trackers/<name>.md`, that tells the skills how to create a ticket, link blockers, set a status and so on in that tracker. No Python talks to a tracker, so adding one means adding one adapter file. Skills use roles, not tracker words: `names.kind.human` (the label or type for a human ticket), `names.edge.merge`, `names.after`, `names.ships_with`, `names.related` and `names.status.<role>`.
@@ -341,6 +342,17 @@ To rename any of these for your workspace, override them in `settings.json`:
 ```
 
 `tracker_names` is merged key by key over the adapter's defaults; a missing role is an error. The top-level `jira_project`, `slice_issue_type` and `child_issue_type` keys from 0.2.0 are still read. `kinetic tracker resolve` prints what kinetic resolved. kinetic state stays authoritative: remote trackers are written to, never read back.
+
+### Orbit: tickets on an Orbit Board
+
+With `tracker: orbit` a run's tickets live on an [Orbit](https://github.com/rcmendes/orbit) Board instead of in `state.json`, so there is one copy and nothing to drift. kinetic still schedules: the frontier, edge types, the parallel cap and fix rounds are unchanged. This works through the **ticket store**, the interface `state.py` reads and writes tickets through; every other tracker uses the local ticket store, exactly as before.
+
+- **What lives where.** Each slice is a Parent Task (`type: epic`) and each ticket a SubTask. Every kinetic field is in the Task's `kinetic` Annotation; Orbit's status, claim, waiting reason and labels are derived from it. A `blocked_by` edge is an Orbit dependency, with its edge type in the Annotation. Every Task of a run carries the label `kinetic-run-<run id>`.
+- **Decompose.** Tickets are staged in `<run_dir>/tickets.staged.json` with local ids, validated, and published in one `orbit batch` when the breakdown gate is approved (`kinetic state publish-tickets` does it on demand). Source Keys make a repeated publish safe.
+- **Other agents keep out.** Waiting agent tickets carry the hold label `kinetic`; add it to `non_ready_labels` in the Board's `config.toml` (doctor warns until you do). kinetic removes it and claims the Task in one batch when it dispatches the ticket.
+- **People.** A human ticket carries `ready-for-human`; finish it with `orbit done <id>`. An agent ticket marked done outside kinetic becomes `needs_decision`, because it has no passing verify.
+- **Liveness.** kinetic's PostToolUse hooks heartbeat the running ticket's claim at most every 5 minutes; `/kinetic:status` lists a running ticket whose lease lapsed as "implementer may be stuck".
+- **Board.** Found from `tracker_settings.orbit_dir`, else the run's first repo, then fixed for the run. `kinetic doctor` checks the binary, the Board, the export schema and the hold label.
 
 ## Human tickets
 
@@ -541,6 +553,8 @@ docs/                        comparison, design spec, implementation plan, rulin
 | `config.py` | Resolves a repo's config from `repos.json` and `.kinetic.json` |
 | `detect_repos.py` | Proposes a verify command from build markers (Maven, Gradle, npm, Go, Cargo, pyproject, Makefile) |
 | `tracker.py` | Resolves the tracker adapter, its settings and role names, and the PR template path |
+| `ticket_store.py` | The ticket store interface and the local ticket store (tickets in `state.json`) |
+| `orbit_store.py` | The Orbit ticket store: tickets as Tasks on an Orbit Board, staged tickets, publish, liveness and doctor rows |
 | `board.py` | Local ticket headers, the `issues/README.md` board and the drift check |
 | `doctor.py` | The health checks behind `/kinetic:doctor`, including tracker access and the PR template |
 | `spec_lint.py` | Checks a spec has non-empty Threat model, Non-functional requirements and Acceptance criteria sections |

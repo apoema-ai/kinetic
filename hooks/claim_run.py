@@ -4,7 +4,9 @@ import _common
 
 
 def main(inp):
-    """After a Bash command that writes the active-run pointer, record its session as the owner."""
+    """After a Bash command that writes the active-run pointer, record its session as the owner.
+    Any shell command inside a ticket worktree also signals that ticket's liveness."""
+    _common.touch_ticket(inp)
     cmd = str((inp.get("tool_input") or {}).get("command") or "")
     sid = inp.get("session_id")
     if not sid or "kinetic/active-run" not in cmd or "tee" not in cmd:

@@ -13,6 +13,9 @@ def render(st: dict) -> str:
     for i, t in sorted(st["tickets"].items()):
         blockers = ", ".join(f"{e['id']} ({e['type']})" for e in t["blocked_by"]) or "—"
         out.append(f"| {i} | {state.field(t, 'kind')} | {t.get('repo') or '—'} | {t['status']} | {blockers} |")
+    stuck = sorted(i for i, t in st["tickets"].items() if t.get("liveness") == "stuck")
+    if stuck:
+        out += ["", "implementer may be stuck: " + ", ".join(stuck)]
     out += ["", "Ready: " + (", ".join(frontier.ready(st)) or "none"), "", "Gates:"]
     gates = st.get("gates") or {}
     out += [f"- {g}: {'yes' if v.get('approved') else 'no'}" for g, v in sorted(gates.items())]

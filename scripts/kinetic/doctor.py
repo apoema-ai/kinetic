@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from kinetic import config, harness, install, tracker
+from kinetic import config, harness, install, ticket_store, tracker
 
 SKILLS = ["resolving-merge-conflicts"]
 PLUGINS = ["superpowers", "dev-fleet"]
@@ -654,6 +654,7 @@ def _tracker_checks(settings: Path, gh_auth: dict | None) -> list[dict]:
         out = [_r("tracker", "pass"), access]
         if kind == "jira":
             out.append(_r("atlassian-mcp", "warn", "check with /mcp"))
+        out.extend(ticket_store.store_for(ticket_store.for_tracker(kind)).health(Path(settings)))
     try:
         tracker.pr_template(None, settings=settings)
         out.append(_r("pr-template", "pass"))
