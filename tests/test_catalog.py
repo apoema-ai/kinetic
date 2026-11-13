@@ -97,5 +97,115 @@ class CatalogSettingTest(unittest.TestCase):
         self.assertEqual(out["candidates"], [])
 
 
+def _recipe_meta():
+    return {
+        "slug": "onboard-asset-class", "title": "Onboard an asset class",
+        "when": "adding a new <ASSET_CLASS> to the warehouse",
+        "parameters": [{"name": "ASSET_CLASS", "meaning": "the asset class", "examples": ["HOME_SECURED"]}],
+        "terms": ["warehouse"],
+        "what_for": {"A": ["a1"], "B": ["b1", "b2"], "C": ["c1"]},
+        "sources": [{"key": "K-1", "prs": [], "repos": ["A", "B", "C"]},
+                    {"key": "K-2", "prs": [], "repos": ["A", "B"]},
+                    {"key": "K-3", "prs": [], "repos": ["A"]}],
+        "updated": "2026-11-13",
+    }
+
+
+def _terms(*names):
+    return {"terms": {n: {"meaning": n, "synonyms": [], "avoid": []} for n in names}}
+
+
+class CatalogFilesTest(unittest.TestCase):
+    def setUp(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        self.d = Path(os.path.realpath(t.name)) / "cat"
+        catalog.init_layout(self.d)
+
+    def _good_catalog(self):
+        catalog.write_doc(self.d / "terms.md", _terms("warehouse", "pledge"), "")
+        meta = _recipe_meta()
+        catalog.write_doc(self.d / "recipes" / "onboard-asset-class.md", meta, catalog.render_recipe(meta))
+        repo = {"repo": "A", "org": "acme", "owns": "owns pledges",
+                "terms": {"warehouse": ["K-1", "K-2"], "pledge": ["K-1"]}, "updated": "2026-11-13"}
+        catalog.write_doc(self.d / "repos" / "A.md", repo, catalog.render_repo(repo))
+
+    def test_doc_round_trip(self):
+        p = self.d / "x.md"
+        catalog.write_doc(p, {"a": [1, 2]}, "# body\n")
+        self.assertEqual(catalog.read_doc(p), ({"a": [1, 2]}, "# body\n"))
+
+    def test_read_doc_bad_frontmatter_names_file_and_line(self):
+        p = self.d / "bad.md"
+        p.write_text("---\n{bad\n---\nbody\n")
+        with self.assertRaises(catalog.CatalogError) as cm:
+            catalog.read_doc(p)
+        self.assertIn(str(p), str(cm.exception))
+        self.assertIn(":2:", str(cm.exception))
+
+    def test_strength_thresholds(self):
+        self.assertEqual(catalog.strength(1, 1), "seen once")
+        self.assertEqual(catalog.strength(3, 3), "always")
+        self.assertEqual(catalog.strength(2, 4), "usually")
+        self.assertEqual(catalog.strength(3, 5), "usually")
+        self.assertEqual(catalog.strength(2, 5), "sometimes")
+        self.assertEqual(catalog.strength(1, 4), "seen once")
+
+    def test_render_recipe_orders_and_labels_repos(self):
+        body = catalog.render_recipe(_recipe_meta())
+        heads = [l for l in body.splitlines() if l.startswith("## ")]
+        self.assertEqual(heads, ["## A (always, 3 of 3)", "## B (usually, 2 of 3)",
+                                 "## C (seen once, 1 of 3)"])
+        self.assertIn("## B (usually, 2 of 3)\n- b1\n- b2\n", body)
+        self.assertLess(body.index("**When to use:**"), body.index("## A"))
+
+    def test_render_index_lists_recipes_and_repos(self):
+        self._good_catalog()
+        idx = catalog.render_index(catalog.load(self.d))
+        self.assertIn("- onboard-asset-class — Onboard an asset class — adding a new <ASSET_CLASS> to the "
+                      "warehouse — A (always), B (usually), C (seen once)", idx)
+        self.assertIn("- A — warehouse (2), pledge (1)", idx)
+
+    def test_ledger_lookup(self):
+        catalog._write(self.d / "ledger.json", {"K-1": {"cataloged_at": "2026-11-13", "recipe": "r", "repos": ["A"]}})
+        out = catalog.ledger_lookup(self.d, ["K-1", "K-2"])
+        self.assertTrue(out["K-1"]["cataloged"])
+        self.assertEqual(out["K-1"]["recipe"], "r")
+        self.assertEqual(out["K-2"], {"cataloged": False})
+
+    def test_lint_clean_catalog_is_empty(self):
+        self._good_catalog()
+        self.assertEqual(catalog.lint(self.d), [])
+
+    def test_lint_reports_bad_frontmatter(self):
+        self._good_catalog()
+        (self.d / "repos" / "B.md").write_text("---\n{bad\n---\n")
+        problems = catalog.lint(self.d)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("B.md:2:", problems[0])
+
+    def test_lint_reports_unknown_term(self):
+        self._good_catalog()
+        catalog.write_doc(self.d / "terms.md", _terms("warehouse"), "")
+        problems = catalog.lint(self.d)
+        self.assertTrue(any("pledge" in p and "A.md" in p for p in problems), problems)
+
+    def test_index_rerenders_bodies_and_index(self):
+        self._good_catalog()
+        p = self.d / "recipes" / "onboard-asset-class.md"
+        meta, body = catalog.read_doc(p)
+        catalog.write_doc(p, meta, body + "\nhand edit\n")
+        catalog.reindex(self.d)
+        self.assertEqual(catalog.lint(self.d), [])
+        self.assertIn("onboard-asset-class", (self.d / "index.md").read_text())
+
+    def test_lint_reports_stale_recipe_body(self):
+        self._good_catalog()
+        p = self.d / "recipes" / "onboard-asset-class.md"
+        meta, body = catalog.read_doc(p)
+        catalog.write_doc(p, meta, body + "\nhand edit\n")
+        self.assertTrue(any("onboard-asset-class.md" in x and "body" in x for x in catalog.lint(self.d)))
+
+
 if __name__ == "__main__":
     unittest.main()
