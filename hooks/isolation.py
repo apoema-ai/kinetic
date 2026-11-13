@@ -16,7 +16,9 @@ def main(inp):
         _common.pre_tool("ask", "kinetic could not parse the file paths in this patch; confirm manually")
         return
     run_dir, st = found
-    roots = [os.path.realpath(r["path"]) for r in st.get("repos", {}).values()]
+    # repos become writable only once the breakdown gate records the grant
+    granted = ((st.get("gates") or {}).get("breakdown") or {}).get("approved")
+    roots = [os.path.realpath(r["path"]) for r in st.get("repos", {}).values()] if granted else []
     roots.append(os.path.realpath(run_dir))
     for path in paths:
         real = os.path.realpath(_common.abs_path(path, inp.get("cwd")))

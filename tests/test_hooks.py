@@ -31,6 +31,7 @@ class HookCase(unittest.TestCase):
     def activate(self):
         state.init(self.run_dir, "feature", "X-1")
         state.set_repo(self.run_dir, "api", str(self.repo), "main")
+        state.record_gate(self.run_dir, "breakdown", True)
         ptr = self.home / ".config" / "kinetic"
         ptr.mkdir(parents=True)
         (ptr / "active-run").write_text(str(self.run_dir))
@@ -207,6 +208,19 @@ class Isolation(HookCase):
                         {"file_path": "sub/a.py"}):
             out = self.hook("isolation", {"tool_input": payload, "cwd": str(self.repo)})
             self.assertIsNone(out, payload)
+
+    def test_isolation_denies_repo_before_breakdown_gate(self):
+        self.activate()
+        state.record_gate(self.run_dir, "breakdown", False)
+        out = self.hook("isolation", {"tool_name": "Write", "tool_input": {"file_path": str(self.repo / "a.py")}})
+        self.assertEqual(self.decision(out), "deny")
+        self.assertNotIn(str(self.repo) + ",", out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_isolation_allows_run_dir_before_breakdown_gate(self):
+        self.activate()
+        state.record_gate(self.run_dir, "breakdown", False)
+        out = self.hook("isolation", {"tool_name": "Write", "tool_input": {"file_path": str(self.run_dir / "spec.md")}})
+        self.assertIsNone(self.decision(out))
 
     def test_isolation_denies_prefix_sibling(self):
         self.activate()
