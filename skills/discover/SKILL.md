@@ -13,7 +13,7 @@ The orchestrator passes:
 - `Run: <run_dir>` (the run directory, `<workspace>/<run-id>/`) and the ref;
 - `Candidates:` the repos known so far, each with where it came from (the ref text, the tracker issue, the repo `/kinetic:run` was started from, the grill), or none;
 - `Spec:` the spec location, if there is one;
-- `Mode: full` or `Mode: confirm-only` (tickets already in hand, or a repo added later by the tickets phase).
+- `Mode: full` or `Mode: confirm-only` (tickets already in hand, or a repo added later by the decompose phase).
 
 Run scripts as `kinetic <module> ...`. Ask the user with the harness's question tool when the profile names one (`kinetic harness` prints it under `Question tool:`; `none` means chat).
 
@@ -105,7 +105,7 @@ Ask the questions of this step together, in one message, and only those that app
    - the suspected repos the user did not take;
    - each follow-up round: what was missing and what the user added.
 
-   Spec, tickets and ship read this file.
+   The specify, decompose and ship phases read this file.
 
 ## Rules
 

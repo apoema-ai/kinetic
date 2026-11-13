@@ -1,6 +1,6 @@
 ---
-name: spec
-description: Turn the grilled conversation into a spec with threat model, non-functional requirements and acceptance criteria, lint it, and publish it to the tracker or the run directory. Use at the spec phase of a kinetic run.
+name: specify
+description: Turn the grilled conversation into a spec with threat model, non-functional requirements and acceptance criteria, lint it, and publish it to the tracker or the run directory. Use at the specify phase of a kinetic run.
 model: sonnet
 ---
 

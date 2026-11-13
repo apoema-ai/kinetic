@@ -1,6 +1,6 @@
 ---
-name: tickets
-description: Break the approved spec into vertical slices (parent tickets) and per-repo child tickets with typed blocking edges, publish them, and record them in run state. Use at the tickets phase of a kinetic run.
+name: decompose
+description: Break the approved spec into vertical slices (parent tickets) and per-repo child tickets with typed blocking edges, publish them, and record them in run state. Use at the decompose phase of a kinetic run.
 model: sonnet
 ---
 

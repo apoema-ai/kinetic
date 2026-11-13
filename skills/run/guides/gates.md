@@ -6,9 +6,9 @@ Three gates: `spec`, `breakdown`, `ship`. Each asks the user — the harness's q
 kinetic state record-gate --run <run_dir> --gate <spec|breakdown|ship> --approved <true|false> --note "<user's words or empty>"
 ```
 
-A rejected gate: record `--approved false` with the reason as `--note`, `set-phase` back to the previous phase (spec gate to `grill` or `spec`, breakdown gate to `tickets`, ship gate to `review`), and re-read and follow that phase skill with the user's feedback. Then ask again. Never advance past an unapproved gate.
+A rejected gate: record `--approved false` with the reason as `--note`, `set-phase` back to the previous phase (spec gate to `grill` or `specify`, breakdown gate to `decompose`, ship gate to `review`), and re-read and follow that phase skill with the user's feedback. Then ask again. Never advance past an unapproved gate.
 
-## Spec gate (after the spec phase)
+## Spec gate (after the specify phase)
 
 Show the spec location (the tracker reference or `<run_dir>/spec.md`) and a three-line summary. The spec must already pass `kinetic spec_lint <file>` (exit 0). Ask: "Approve this spec?" Options: approve, revise.
 

@@ -445,7 +445,10 @@ class LaneAndRepoTest(unittest.TestCase):
 
     def test_discover_phase_sits_between_grill_and_spec(self):
         self.assertEqual(state.PHASES.index("discover"), state.PHASES.index("grill") + 1)
-        self.assertEqual(state.PHASES.index("spec"), state.PHASES.index("discover") + 1)
+        self.assertEqual(state.PHASES.index("specify"), state.PHASES.index("discover") + 1)
+        self.assertEqual(state.PHASES.index("decompose"), state.PHASES.index("specify") + 1)
+        self.assertNotIn("spec", state.PHASES)
+        self.assertNotIn("tickets", state.PHASES)
 
     def test_set_lane_moves_between_feature_and_epic_at_any_phase(self):
         state.init(self.run_dir, "feature", "X-1")
@@ -500,3 +503,23 @@ class GrantTest(unittest.TestCase):
             state.record_gate(run, "breakdown", False, "revise")
             g = state.load(run)["gates"]["breakdown"]
             self.assertEqual((g["approved"], g["granted_at"]), (False, first))
+
+
+class LegacyPhaseTest(unittest.TestCase):
+    def test_runs_recorded_in_spec_or_tickets_load_as_the_new_names(self):
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            run = Path(d) / "run"
+            state.init(run, "epic", "X-1")
+            for old, new in (("spec", "specify"), ("tickets", "decompose")):
+                f = run / "state.json"
+                f.write_text(json.dumps(dict(json.loads(f.read_text()), phase=old)))
+                self.assertEqual(state.load(run)["phase"], new)
+                state.set_ticket(run, "A", status="todo")  # any write keeps the new name
+                self.assertEqual(json.loads(f.read_text())["phase"], new)
+
+    def test_set_phase_accepts_old_names_as_aliases(self):
+        with tempfile.TemporaryDirectory() as d:
+            run = Path(d) / "run"
+            state.init(run, "epic", "X-1")
+            self.assertEqual(state.set_phase(run, "tickets")["phase"], "decompose")

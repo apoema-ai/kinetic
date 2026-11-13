@@ -94,9 +94,9 @@ At any point `/kinetic:status` shows where the run is, and `/kinetic:ask` prints
           |
      [discover] -- candidate repos, approved sources, worktrees; final lane
           |
-       [spec] -- spec_lint must pass ---------------> GATE: spec
+     [specify] -- spec_lint must pass ---------------> GATE: spec
           |
-      [tickets] -- slices, per-repo tickets, typed edges
+   [decompose] -- slices, per-repo tickets, typed edges
           |      graph validate must be clean ------> GATE: breakdown (records the grant)
           |
        [build] -- frontier -> implementer per ticket (background, own worktree)
@@ -121,10 +121,10 @@ At any point `/kinetic:status` shows where the run is, and `/kinetic:ask` prints
 | Lane | When | Phases |
 |---|---|---|
 | `quick` | One small ticket, one repo known at intake, no design decisions | intake, discover, build, review, ship, retro |
-| `feature` | One repo, needs a spec | grill, discover, spec, tickets, build, review, ship, retro |
+| `feature` | One repo, needs a spec | grill, discover, specify, decompose, build, review, ship, retro |
 | `epic` | Several repos | all phases; per-repo integration branches, typed edges |
 
-The quick lane has no grill, spec or tickets phase. Its breakdown gate is a single question that also asks which seams the tests may use, because a background implementer has no one to ask.
+The quick lane has no grill, spec or decompose phase. Its breakdown gate is a single question that also asks which seams the tests may use, because a background implementer has no one to ask.
 
 A run starts at the first missing artifact:
 
@@ -192,7 +192,7 @@ Here the tracker is Jira, so ticket ids are Jira keys and the run id is `INV-432
    | INV-4323 | api | INV-4322 (`snapshot`) |
    | INV-4324 | web | INV-4323 (`merge`) |
 
-   `INV-4322` produces `StatementClient.export`, which `INV-4323` consumes; `graph validate` would reject the breakdown if `INV-4323` were not blocked by `INV-4322`. The `snapshot` edge is allowed because `statement-client` has `publish_snapshot` and `api` has `pin` in `repos.json`. Without them, the tickets phase would use a `merge` edge. You approve the breakdown and the grant.
+   `INV-4322` produces `StatementClient.export`, which `INV-4323` consumes; `graph validate` would reject the breakdown if `INV-4323` were not blocked by `INV-4322`. The `snapshot` edge is allowed because `statement-client` has `publish_snapshot` and `api` has `pin` in `repos.json`. Without them, the decompose phase would use a `merge` edge. You approve the breakdown and the grant.
 5. **Build.** Each repo has its own integration branch `kinetic/INV-4321/integration`, cut at discover.
    - Round 1: only `INV-4322` is ready. Its implementer adds the client method. After review it merges into `statement-client`'s integration branch, and `kinetic.gitops pin` publishes the snapshot and pins `api` to it.
    - Round 2: `INV-4323` is ready. Its worktree is cut from `api`'s integration branch, which now carries the pin, so the implementer builds against the new client.
@@ -211,7 +211,7 @@ Three gates, each asked with a multiple-choice question and recorded in state (`
 
 | Gate | When | What you see |
 |---|---|---|
-| `spec` | After the spec phase | The spec location and a three-line summary. The spec must already pass `spec_lint`. |
+| `spec` | After the specify phase | The spec location and a three-line summary. The spec must already pass `spec_lint`. |
 | `breakdown` | After tickets | Every ticket with its repo and blockers by edge type. Approving records the **grant**. |
 | `ship` | After review | Per repo: integration branch, base branch, merge order, latest verify result. |
 
@@ -233,7 +233,7 @@ Tickets block each other with exactly three edge types (in Jira, a "blocks" link
 | `merge` | the upstream ticket is merged into its integration branch | a second ticket in the same repo builds on the first |
 | `release` | the upstream version is actually released (marked by hand) | a consumer that can only use a released artifact |
 
-`snapshot` edges need `publish_snapshot` and `pin` configured for the repos involved; without them the tickets phase uses `merge` edges instead.
+`snapshot` edges need `publish_snapshot` and `pin` configured for the repos involved; without them the decompose phase uses `merge` edges instead.
 
 ### Interfaces
 
@@ -380,8 +380,8 @@ Ship fills one template for every PR. The default is `templates/pr-body.md`. To 
 | `init`, `doctor`, `status`, `ask` | commands | sonnet, haiku, haiku, haiku | Setup and read-only views |
 | `grill` | phase skill | inline | Interview covering threat model and non-functional requirements; keeps the glossary and ADR drafts |
 | `discover` | phase skill | inline | Finds the run's repos from approved sources (base folders, your sources, the GitHub org), confirms them with you, registers them and cuts their worktrees |
-| `spec` | phase skill | inline | Spec with testing decisions, linted by `spec_lint`, published to Jira or `<run_dir>/spec.md` |
-| `tickets` | phase skill | inline | Vertical slices, per-repo tickets, typed edges, validated by `graph validate` |
+| `specify` | phase skill | inline | Spec with testing decisions, linted by `spec_lint`, published to Jira or `<run_dir>/spec.md` |
+| `decompose` | phase skill | inline | Vertical slices, per-repo tickets, typed edges, validated by `graph validate` |
 | `ship` | phase skill | inline | PR bodies, merge order, draft PR set |
 | `retro` | phase skill | inline | Retro, runbook, release notes |
 | `tdd` | skill | sonnet | Test-first loop the implementer preloads (`skills: [tdd]`) |

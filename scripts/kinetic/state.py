@@ -16,7 +16,7 @@ STATUSES = ("todo", "running", "done", "done_with_concerns", "needs_decision",
             "blocked", "merged", "released")
 
 
-PHASES = ("intake", "grill", "discover", "spec", "tickets", "build", "review", "ship", "retro", "done")
+PHASES = ("intake", "grill", "discover", "specify", "decompose", "build", "review", "ship", "retro", "done")
 EDGE_TYPES = ("snapshot", "merge", "release")
 
 
@@ -28,8 +28,15 @@ def _file(run_dir) -> Path:
     return Path(run_dir) / "state.json"
 
 
+# phase names before 0.4.0; runs recorded in them read as the new names
+OLD_PHASES = {"spec": "specify", "tickets": "decompose"}
+
+
 def load(run_dir) -> dict:
-    return json.loads(_file(run_dir).read_text())
+    st = json.loads(_file(run_dir).read_text())
+    if st.get("phase") in OLD_PHASES:
+        st["phase"] = OLD_PHASES[st["phase"]]
+    return st
 
 
 def atomic_write(path, text: str) -> None:
@@ -158,6 +165,7 @@ def ship_refusal(state: dict, run_dir) -> str | None:
 
 
 def set_phase(run_dir, phase: str) -> dict:
+    phase = OLD_PHASES.get(phase, phase)
     if phase not in PHASES:
         raise ValueError(f"invalid phase '{phase}': expected one of {PHASES}")
 

@@ -422,7 +422,7 @@ class InstallCodexTest(InstallCase):
 
     USER_ONLY = {"ask", "doctor", "implement", "init", "run", "status"}
     SKILL_NAMES = {"ask", "discover", "doctor", "grill", "implement", "init", "retro",
-                   "run", "ship", "spec", "status", "tdd", "tickets"}
+                   "run", "ship", "specify", "status", "tdd", "decompose"}
     AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
                    "integration-reviewer", "spec-reviewer",
                    "standards-reviewer"}
@@ -688,7 +688,7 @@ class InstallOpenCodeTest(InstallCase):
 
     USER_ONLY = {"ask", "doctor", "implement", "init", "run", "status"}
     SKILL_NAMES = {"ask", "discover", "doctor", "grill", "implement", "init", "retro",
-                   "run", "ship", "spec", "status", "tdd", "tickets"}
+                   "run", "ship", "specify", "status", "tdd", "decompose"}
     AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
                    "integration-reviewer", "spec-reviewer",
                    "standards-reviewer"}

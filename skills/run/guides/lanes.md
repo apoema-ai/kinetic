@@ -12,10 +12,10 @@ Size and uncertainty are judgment calls; state your pick and why in one line and
 | Lane | When | Phases |
 |---|---|---|
 | quick | One small ticket, one repo known at intake, no design decisions | intake, discover, build, review, ship, retro |
-| feature | One repo, needs a spec | grill, discover, spec, tickets, build, review, ship, retro |
+| feature | One repo, needs a spec | grill, discover, specify, decompose, build, review, ship, retro |
 | epic | Several repos | all phases; per-repo integration branches, typed edges |
 
-Quick lane: no grill, spec or tickets phase. Order: intake, discover (`Mode: confirm-only` on the one repo), the breakdown gate, build. Its gates are a one-question breakdown gate (it records the grant, see `gates.md`) and the ship gate. You create the one ticket yourself in state:
+Quick lane: no grill, spec or decompose phase. Order: intake, discover (`Mode: confirm-only` on the one repo), the breakdown gate, build. Its gates are a one-question breakdown gate (it records the grant, see `gates.md`) and the ship gate. You create the one ticket yourself in state:
 
 ```
 kinetic state set-ticket --run <run_dir> --id <id> --field repo=<repo> --field 'blocked_by=[]'
@@ -32,7 +32,7 @@ The id is the tracker reference if the ref is one, else `01-<repo>-<slug>` (loca
 | Spec and tickets with edges | discover (`Mode: confirm-only` on the tickets' repos), then build |
 | One small ticket, no spec | quick lane |
 
-How to check each artifact: a spec exists as a tracker issue the ref points to (fetch it through the adapter named by `kinetic tracker resolve`) or `<run_dir>/spec.md`; run `kinetic spec_lint <spec-file>` on a local one and treat lint errors as "spec missing" until fixed. Tickets exist when `kinetic state load --run <run_dir>` shows non-empty `tickets` or the tracker has child tickets for the spec (then register them with `set-slices` and `set-ticket` as in `skills/tickets/SKILL.md` step 5).
+How to check each artifact: a spec exists as a tracker issue the ref points to (fetch it through the adapter named by `kinetic tracker resolve`) or `<run_dir>/spec.md`; run `kinetic spec_lint <spec-file>` on a local one and treat lint errors as "spec missing" until fixed. Tickets exist when `kinetic state load --run <run_dir>` shows non-empty `tickets` or the tracker has child tickets for the spec (then register them with `set-slices` and `set-ticket` as in `skills/decompose/SKILL.md` step 5).
 
 A spec brought in from outside still needs the spec gate before tickets. Tickets brought in still need the breakdown gate before build, because the gate records the grant.
 

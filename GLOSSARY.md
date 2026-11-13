@@ -1,6 +1,6 @@
 # Kinetic
 
-Kinetic is an SDLC pipeline (grill, spec, tickets, multi-repo build, review, ship, retro) that runs inside a coding agent and drives work through an issue tracker.
+Kinetic is an SDLC pipeline (grill, discover, specify, decompose, multi-repo build, review, ship, retro) that runs inside a coding agent and drives work through an issue tracker.
 
 ## Harnesses
 
