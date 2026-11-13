@@ -421,7 +421,7 @@ class InstallCodexTest(InstallCase):
     a manual /hooks step) and does not require the codex CLI on PATH."""
 
     USER_ONLY = {"ask", "doctor", "implement", "init", "run", "status"}
-    SKILL_NAMES = {"ask", "doctor", "grill", "implement", "init", "retro",
+    SKILL_NAMES = {"ask", "discover", "doctor", "grill", "implement", "init", "retro",
                    "run", "ship", "spec", "status", "tdd", "tickets"}
     AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
                    "integration-reviewer", "spec-reviewer",
@@ -687,7 +687,7 @@ class InstallOpenCodeTest(InstallCase):
     required on PATH."""
 
     USER_ONLY = {"ask", "doctor", "implement", "init", "run", "status"}
-    SKILL_NAMES = {"ask", "doctor", "grill", "implement", "init", "retro",
+    SKILL_NAMES = {"ask", "discover", "doctor", "grill", "implement", "init", "retro",
                    "run", "ship", "spec", "status", "tdd", "tickets"}
     AGENT_NAMES = {"fix-reviewer", "implementer", "implementer-strong",
                    "integration-reviewer", "spec-reviewer",
