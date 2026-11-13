@@ -17,7 +17,12 @@ Run this outside the session that owns the active run: in that session the isola
 
 ## Steps
 
-1. **Repos.** Use the paths in the arguments; if none, ask which repo paths to register. The default name of each repo is its directory basename; the user may override it.
+1. **Repos.** Use the paths in the arguments. With none, use the current directory: run `kinetic discover scan --root "$PWD"`.
+   - The current directory is inside a git repo: the scan returns that one repo (its top level); register it.
+   - It is a folder holding git repos: ask which to register, all pre-selected. Also ask whether to save the folder as a repo root for discovery; on yes, `kinetic discover remember --root "$PWD"`.
+   - The scan returns nothing: ask which repo paths to register.
+
+   The default name of each repo is its directory basename; the user may override it.
 2. **Detect.** Run `kinetic detect_repos PATH [PATH ...]`. It prints JSON `{path: {"verify": ..., "marker": ...}}`.
 3. **Confirm verify.** Ask only about repos whose `verify` is null (ask for the command) or looks unusual (confirm it). Accept the rest silently.
 3b. **Snapshots.** For each repo ask, one at a time and only if it publishes snapshot builds other repos consume: the `publish_snapshot` command (builds and publishes a snapshot) and the `pin` command (run in the downstream repo; it reads `KINETIC_UPSTREAM_REF`). Leave both unset otherwise: the tickets phase then uses `merge` edges between repos instead of `snapshot` edges.

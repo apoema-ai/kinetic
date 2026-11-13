@@ -6,9 +6,9 @@ You stay thin: never read code or full diffs. Read only script JSON, the first l
 
 1. Validate: `kinetic graph validate --run <run_dir>`. Stop on any `errors` and send the user back to the tickets phase. This must come first: `frontier` returns an empty list on a cycle, which would look like "nothing to do".
 2. The breakdown gate must be recorded approved (`gates.md`).
-3. For each repo in play, find its base branch (`base_branch` in repo config, default `main`) and register it with the worktree as its path and integration branch `kinetic/<run-id>/integration` (git cannot hold both `kinetic/<run-id>` and `kinetic/<run-id>/<id>`, so the integration branch is never just `kinetic/<run-id>`):
-   - Create the worktree with the `checkout-ticket-repos` skill if available (branch `kinetic/<run-id>/integration` off the base). If it is not available: `kinetic gitops worktree --repo <repo-path> --dest <run_dir>/worktrees/<repo> --branch kinetic/<run-id>/integration --base <base>`.
-   - `kinetic state set-repo --run <run_dir> --name <repo> --path <worktree> --integration-branch kinetic/<run-id>/integration`
+3. Repos and integration worktrees already exist: the discover phase registered every repo in `state.repos` with its worktree `<run_dir>/worktrees/<repo>` on `kinetic/<run-id>/integration`. Check them:
+   - Every agent ticket's repo must be in `state.repos` (`graph validate` in step 1 reports it). A run started before the discover phase existed has empty `state.repos`: run `skills/discover/SKILL.md` with `Mode: confirm-only` on its tickets' repos first. Any other missing repo means a ticket was added after the breakdown gate: stop, `set-phase tickets`, and ask the breakdown gate again, so the grant names every repo.
+   - A repo in state whose worktree directory is gone (recovery): recreate it with `kinetic gitops worktree --repo <repo-path from repos.json> --dest <run_dir>/worktrees/<repo> --branch kinetic/<run-id>/integration --base <base>` (base: `base_branch` in repo config, default `main`). The integration branch is never just `kinetic/<run-id>`: git cannot hold both that and `kinetic/<run-id>/<id>`.
 4. Make `<run_dir>/reports`, `<run_dir>/reviews` and `<run_dir>/issues` exist. Ticket worktrees are NOT created here: each is cut at dispatch time (round step 2) so it starts from the integration branch as it is then, after its upstream tickets merged.
 
 ## Each round

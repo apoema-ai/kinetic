@@ -42,13 +42,14 @@ Write the pointer: `printf '%s' <run_dir> | tee ~/.config/kinetic/active-run` (t
 
 ## 3. Phases
 
-Set each with `kinetic state set-phase --run <run_dir> --phase <phase>` just before starting it. Order: intake, grill, spec, tickets, build, review, ship, retro, done. Skip the phases the lane skips (`lanes.md`).
+Set each with `kinetic state set-phase --run <run_dir> --phase <phase>` just before starting it. Order: intake, grill, discover, spec, tickets, build, review, ship, retro, done. Skip the phases the lane skips (`lanes.md`).
 
 | Phase | Do |
 |---|---|
 | grill | Read and follow `skills/grill/SKILL.md`. |
+| discover | Read and follow `skills/discover/SKILL.md` with `Mode: full`, passing the candidate repos and where each came from (the ref text, the tracker issue, the registered repo the run was started from, the grill). Every lane runs it: it registers the repos, cuts their integration worktrees and sets the final lane. |
 | spec | Read and follow `skills/spec/SKILL.md`, then run the spec gate (`gates.md`). |
-| tickets | Epic only: use `find-ticket-repos` if available to confirm repos, else ask the user. Read and follow `skills/tickets/SKILL.md`, then run the breakdown gate (`gates.md`). |
+| tickets | Read and follow `skills/tickets/SKILL.md`. If it needs a repo that is not in the run, run `skills/discover/SKILL.md` with `Mode: confirm-only` for that repo without changing the phase, then return to tickets. Then run the breakdown gate (`gates.md`). |
 | build | `guides/build-loop.md`, build loop. |
 | review | `guides/build-loop.md`, review phase. |
 | ship | Read and follow `skills/ship/SKILL.md`, run the ship gate (`gates.md`) first. Offer `dev-fleet:release` only if the user asks and the repo is k8s-hosted. |

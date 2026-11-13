@@ -14,7 +14,7 @@ Show the spec location (the tracker reference or `<run_dir>/spec.md`) and a thre
 
 ## Breakdown gate (after tickets; records the grant)
 
-Before asking, `kinetic graph validate --run <run_dir>` must print empty `errors`. Show the ticket list, human tickets first with their one-line reason: id, type, repo (human tickets may have none), blocked-by with edge types, after / ships-with / related where set, and interfaces (produces / consumes, agent tickets only). Show every `warnings` entry under the list (an interface no ticket produces) so the user can confirm it already exists.
+Before asking, `kinetic graph validate --run <run_dir>` must print empty `errors`. An error that a ticket's repo is not in the run: run `skills/discover/SKILL.md` with `Mode: confirm-only` for those repos (this also brings a run started before the discover phase existed up to date), then validate again. Show the repos in the run (`state.repos`) above the ticket list; the grant covers exactly those. Show the ticket list, human tickets first with their one-line reason: id, type, repo (human tickets may have none), blocked-by with edge types, after / ships-with / related where set, and interfaces (produces / consumes, agent tickets only). Show every `warnings` entry under the list (an interface no ticket produces) so the user can confirm it already exists.
 
 The question must spell out the grant in substance:
 
