@@ -3,8 +3,10 @@ listing the clones under it. Judgment (which folder to use) lives in the skills.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -79,6 +81,80 @@ def list_clones(bare_dir) -> list:
                         "remote": _git(child, "config", "--get", "remote.origin.url"),
                         "default_branch": default_branch(child)})
     return out
+
+
+def _run(argv) -> str:
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True)
+    except OSError as e:
+        raise RuntimeError(str(e))
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip() or f"{argv[0]} failed")
+    return r.stdout
+
+
+def clone(bare_dir, repo=None, url=None, name=None) -> dict:
+    root = Path(bare_dir)
+    if not root.is_dir():
+        raise ValueError(f"not a directory: {bare_dir}")
+    if repo and not url and not name:
+        if repo.count("/") != 1 or not all(repo.split("/")):
+            raise ValueError(f"--repo must be ORG/NAME, got: {repo}")
+        name = repo.split("/")[1]
+    elif not (url and name and not repo):
+        raise ValueError("give either --repo ORG/NAME, or --url together with --name")
+    dest = root / name
+    if dest.exists():
+        raise ValueError(f"already exists: {dest}")
+    try:
+        if repo:
+            _run(["gh", "repo", "clone", repo, str(dest), "--", "--bare"])
+        else:
+            _run(["git", "clone", "--bare", url, str(dest)])
+        _run(["git", "-C", str(dest), "config", "remote.origin.fetch",
+              "+refs/heads/*:refs/remotes/origin/*"])
+        _run(["git", "-C", str(dest), "fetch", "origin"])
+        branch = default_branch(dest)
+        if branch:
+            _run(["git", "-C", str(dest), "branch", f"--set-upstream-to=origin/{branch}", branch])
+    except RuntimeError:
+        shutil.rmtree(dest, ignore_errors=True)  # no half-made clone left to block a retry
+        raise
+    return {"name": name, "path": str(dest), "default_branch": branch}
+
+
+def _origin_refs(clone_path) -> dict:
+    out = _run(["git", "-C", str(clone_path), "for-each-ref",
+                "--format=%(refname) %(objectname) %(symref)", "refs/remotes/origin"])
+    refs = {}
+    for line in out.splitlines():
+        ref, sha, *symref = line.split(" ")
+        if not any(symref):  # origin/HEAD is a pointer, not a branch that advanced
+            refs[ref] = sha
+    return refs
+
+
+def _refresh_one(bare_dir, name) -> dict:
+    path = Path(bare_dir) / name
+    if not (path.is_dir() and is_bare(path)):
+        return {"name": name, "ok": False, "advanced": [],
+                "error": f"no bare clone named {name} in {bare_dir}"}
+    try:
+        before = _origin_refs(path)
+        _run(["git", "-C", str(path), "fetch", "origin", "--prune"])
+        after = _origin_refs(path)
+    except RuntimeError as e:
+        return {"name": name, "ok": False, "advanced": [], "error": str(e)}
+    advanced = [{"ref": ref, "from": before.get(ref), "to": after.get(ref)}
+                for ref in sorted(set(before) | set(after)) if before.get(ref) != after.get(ref)]
+    return {"name": name, "ok": True, "advanced": advanced, "error": None}
+
+
+def refresh(bare_dir, names=None) -> list:
+    if names is None:
+        names = [c["name"] for c in list_clones(bare_dir)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        return list(pool.map(lambda n: _refresh_one(bare_dir, n), names))
 
 
 def _scan(home: Path) -> dict:
@@ -184,7 +260,14 @@ def main(argv=None) -> int:
     sp.add_argument("--create", action="store_true")
     sub.add_parser("show")
     sub.add_parser("list")
+    sp = sub.add_parser("clone")
+    sp.add_argument("--repo", default=None)
+    sp.add_argument("--url", default=None)
+    sp.add_argument("--name", default=None)
+    sp = sub.add_parser("refresh")
+    sp.add_argument("--name", action="append", default=None)
     a = p.parse_args(argv)
+    code = 0
     try:
         if a.cmd == "detect":
             out = detect(a.cwd or os.getcwd(), SETTINGS)
@@ -195,12 +278,21 @@ def main(argv=None) -> int:
             if d is None:
                 print("no bare_dir saved; run 'kinetic bare set --dir PATH'", file=sys.stderr)
                 return 1
-            out = {"bare_dir": d} if a.cmd == "show" else list_clones(d)
-    except (ValueError, OSError, config.ConfigError) as e:
+            if a.cmd == "show":
+                out = {"bare_dir": d}
+            elif a.cmd == "list":
+                out = list_clones(d)
+            elif a.cmd == "clone":
+                out = clone(d, a.repo, a.url, a.name)
+            else:
+                results = refresh(d, a.name)
+                out = {"results": results}
+                code = 0 if all(r["ok"] for r in results) else 1
+    except (ValueError, RuntimeError, OSError, config.ConfigError) as e:
         print(str(e), file=sys.stderr)
         return 1
     print(json.dumps(out))
-    return 0
+    return code
 
 
 if __name__ == "__main__":
