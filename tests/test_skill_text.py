@@ -152,6 +152,13 @@ class SkillTextTest(unittest.TestCase):
             _body(ROOT / "agents" / "implementer-strong.md"),
             _body(ROOT / "agents" / "implementer.md"))
 
+    def test_discover_uses_bare_folder(self):
+        text = (ROOT / "skills" / "discover" / "SKILL.md").read_text()
+        for needle in ("kinetic bare show", "kinetic bare list", "kinetic bare refresh",
+                       "kinetic bare clone --repo", "not refreshed:", "default_branch"):
+            self.assertIn(needle, text)
+        self.assertNotIn("only the GitHub calls in step 4 reach the network", text)
+
 
 if __name__ == "__main__":
     unittest.main()
