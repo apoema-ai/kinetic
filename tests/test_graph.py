@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from kinetic import graph
+from kinetic import graph, state
 
 
 def t(repo="r", slice=None, blocked_by=()):
@@ -137,3 +137,27 @@ class SoftLinksTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunReposTest(unittest.TestCase):
+    def test_agent_ticket_repo_must_be_in_run(self):
+        errors = graph.validate({"A": t(repo="web")}, "epic", repos={"api": {}})
+        self.assertTrue(any("repo 'web' is not in the run" in e for e in errors))
+        self.assertEqual(graph.validate({"A": t(repo="api")}, "epic", repos={"api": {}}), [])
+
+    def test_human_ticket_without_repo_is_not_checked_against_run(self):
+        h = dict(t(repo=None), kind="human")
+        self.assertEqual(graph.validate({"H": h}, "epic", repos={}), [])
+
+    def test_cli_passes_run_repos(self):
+        import io, contextlib, tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            run = Path(d) / "run"
+            state.init(run, "epic", "X-1")
+            state.set_ticket(run, "A", repo="web", blocked_by=[])
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = graph.main(["validate", "--run", str(run)])
+            self.assertEqual(code, 1)
+            self.assertIn("not in the run", buf.getvalue())
