@@ -93,6 +93,54 @@ class MergeTests(unittest.TestCase):
                          {"merged": True, "conflicts": []})
 
 
+class BareWorktreeTests(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self.td.name)
+        self.remote = self.tmp / "remote"
+        self.bare = self.tmp / "bare"
+        make_repo(self.remote)
+        git(self.tmp, "clone", "--bare", str(self.remote), str(self.bare))
+        git(self.bare, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+        git(self.bare, "fetch", "origin")
+        commit_file(self.remote, "b.txt", "b\n", "ahead")
+        git(self.bare, "fetch", "origin", "--prune")
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_bare_repo_worktree_starts_from_origin_base(self):
+        gitops.create_worktree(self.bare, self.tmp / "wt", "kinetic/R/integration", "main")
+        self.assertEqual(git(self.tmp / "wt", "rev-parse", "HEAD"), git(self.remote, "rev-parse", "main"))
+        self.assertNotEqual(git(self.bare, "rev-parse", "main"), git(self.remote, "rev-parse", "main"))
+
+    def test_bare_repo_keeps_explicit_origin_prefix(self):
+        gitops.create_worktree(self.bare, self.tmp / "wt", "kinetic/R/integration", "origin/main")
+        self.assertEqual(git(self.tmp / "wt", "rev-parse", "HEAD"), git(self.remote, "rev-parse", "main"))
+
+    def test_bare_repo_reuses_existing_branch(self):
+        git(self.bare, "branch", "kinetic/R/integration", "main")   # at the stale local main
+        gitops.create_worktree(self.bare, self.tmp / "wt", "kinetic/R/integration", "main")
+        self.assertEqual(git(self.tmp / "wt", "rev-parse", "HEAD"), git(self.bare, "rev-parse", "main"))
+
+    def test_bare_repo_missing_origin_base_raises(self):
+        with self.assertRaises(RuntimeError):
+            gitops.create_worktree(self.bare, self.tmp / "wt", "kinetic/R/integration", "develop")
+
+    def test_cleanup_branch_d_on_bare_clone_after_squash_merge(self):
+        # pins cleanup's fallback (skills/cleanup/SKILL.md step 4) on a bare clone:
+        # branch -d refuses against the stale local main; the tip still equals the
+        # recorded PR head, so the headRefOid rule applies
+        gitops.create_worktree(self.bare, self.tmp / "wt", "kinetic/R/integration", "main")
+        commit_file(self.tmp / "wt", "c.txt", "c\n", "work")
+        head = git(self.tmp / "wt", "rev-parse", "HEAD")
+        git(self.bare, "worktree", "remove", str(self.tmp / "wt"))
+        r = subprocess.run(["git", "-C", str(self.bare), "branch", "-d", "kinetic/R/integration"],
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(git(self.bare, "rev-parse", "kinetic/R/integration"), head)
+
+
 class MergeOrderTests(unittest.TestCase):
     def test_merge_order_respects_edges(self):
         tickets = {
