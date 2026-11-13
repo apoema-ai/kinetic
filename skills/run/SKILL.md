@@ -53,7 +53,7 @@ Set each with `kinetic state set-phase --run <run_dir> --phase <phase>` just bef
 | build | `guides/build-loop.md`, build loop. |
 | review | `guides/build-loop.md`, review phase. |
 | ship | Read and follow `skills/ship/SKILL.md`, run the ship gate (`gates.md`) first. Offer `dev-fleet:release` only if the user asks and the repo is k8s-hosted. |
-| retro | Read and follow `skills/retro/SKILL.md`. Then `set-phase done` and `rm -f ~/.config/kinetic/active-run`. |
+| retro | Read and follow `skills/retro/SKILL.md`. Then `set-phase done`. Ticket worktrees and branches were kept until now for recovery: read and follow `skills/cleanup/SKILL.md` with this run directory (it asks before removing anything). Then `rm -f ~/.config/kinetic/active-run`. |
 
 A rejected gate returns to the previous phase skill, never forward. Deploy is hook-confirmed; git pushes and `gh pr create|merge|edit|ready` are hook-confirmed (as are Atlassian MCP writes); other `gh pr` writes (close, comment, review), `gh issue`, `gh label` and `gh api` tracker writes, and other MCP tracker writes such as Linear, are covered only by the grant. Never try to work around a hook decision.
 

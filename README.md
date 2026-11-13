@@ -370,6 +370,7 @@ Ship fills one template for every PR. The default is `templates/pr-body.md`. To 
 | `/kinetic:doctor` | Read-only health check with a one-line fix per failure |
 | `/kinetic:status [run-dir]` | Phase, tickets, frontier and gates of a run (the active one by default) |
 | `/kinetic:ask` | The lanes and the next step `next_step` computes for the active run |
+| `/kinetic:cleanup [run-dir]` | Removes the run's local worktrees and branches whose work is merged, after one confirmation |
 
 ## Skills and agents
 
@@ -378,6 +379,7 @@ Ship fills one template for every PR. The default is `templates/pr-body.md`. To 
 | `run` | command | sonnet | The orchestrator: lanes, gates, phases, build loop |
 | `implement` | command | sonnet | `run --from build` |
 | `init`, `doctor`, `status`, `ask` | commands | sonnet, haiku, haiku, haiku | Setup and read-only views |
+| `cleanup` | command | sonnet | Removes merged worktrees and branches of a run |
 | `grill` | phase skill | inline | Interview covering threat model and non-functional requirements; keeps the glossary and ADR drafts |
 | `discover` | phase skill | inline | Finds the run's repos from approved sources (base folders, your sources, the GitHub org), confirms them with you, registers them and cuts their worktrees |
 | `specify` | phase skill | inline | Spec with testing decisions, linted by `spec_lint`, published to Jira or `<run_dir>/spec.md` |
