@@ -73,9 +73,11 @@ def _git(path: str, *args) -> str | None:
 
 
 def _item(path: str, registered: dict) -> dict:
+    from kinetic import bare  # bare imports discover at module level
     name = registered.get(path)
     return {"name": os.path.basename(path), "path": path,
             "remote": _git(path, "config", "--get", "remote.origin.url"),
+            "bare": bare.is_bare(path),
             "registered": name is not None, "registered_as": name}
 
 
@@ -86,6 +88,7 @@ def scan(roots: list, central=None, enclosing: bool = False) -> list:
     entries = config._load(Path(central or REPOS))
     registered = {_real(e["path"]): n for n, e in entries.items()
                   if isinstance(e, dict) and e.get("path")}
+    from kinetic import bare  # bare imports discover at module level
     out, seen = [], set()
 
     def add(p):
@@ -97,6 +100,9 @@ def scan(roots: list, central=None, enclosing: bool = False) -> list:
         root = _real(root)
         if not os.path.isdir(root):
             continue
+        if bare.is_bare(root):
+            add(root)
+            continue
         top = _git(root, "rev-parse", "--show-toplevel")
         if top and (enclosing or _real(top) == root):
             add(_real(top))
@@ -107,8 +113,9 @@ def scan(roots: list, central=None, enclosing: bool = False) -> list:
             continue
         for child in children:
             try:
-                if child.is_dir() and os.path.exists(os.path.join(child.path, ".git")) \
-                        and os.access(child.path, os.R_OK | os.X_OK):
+                if child.is_dir() and os.access(child.path, os.R_OK | os.X_OK) \
+                        and (os.path.exists(os.path.join(child.path, ".git"))
+                             or bare.is_bare(child.path)):
                     add(_real(child.path))
             except OSError:
                 continue

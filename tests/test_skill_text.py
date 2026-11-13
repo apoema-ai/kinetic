@@ -16,9 +16,10 @@ CLAUDE_ONLY_TOOLS = ("AskUserQuestion", "SendMessage", "run_in_background")
 # as the Claude/Devin default.
 CONCRETE_MODEL = re.compile(r"\b(sonnet|opus|haiku|gpt-[\w.-]+|claude-[\w.-]+)\b")
 
-# The five user-only skills carry both invocation keys; no other skill may
+# The user-only skills carry both invocation keys; no other skill may
 # carry triggers: (doctor keeps only disable-model-invocation, per rulings).
-USER_ONLY_SKILLS = ("ask", "cleanup", "implement", "init", "run", "status")
+USER_ONLY_SKILLS = ("ask", "bare-clone", "bare-refresh", "bare-setup", "cleanup",
+                    "implement", "init", "run", "status")
 
 # Spec model tiers: implementer and fix-reviewer are standard; the reviewers and
 # implementer-strong are strong. model: stays as the Claude/Devin default
@@ -150,6 +151,15 @@ class SkillTextTest(unittest.TestCase):
         self.assertEqual(
             _body(ROOT / "agents" / "implementer-strong.md"),
             _body(ROOT / "agents" / "implementer.md"))
+
+    def test_discover_uses_bare_folder(self):
+        text = (ROOT / "skills" / "discover" / "SKILL.md").read_text()
+        for needle in ("kinetic bare show", "kinetic bare list", "kinetic bare refresh",
+                       "kinetic bare clone --repo", "not refreshed:", "default_branch",
+                       "never run it without `--name`", "counts as one match",
+                       "recheck with `kinetic bare list`"):
+            self.assertIn(needle, text)
+        self.assertNotIn("only the GitHub calls in step 4 reach the network", text)
 
 
 if __name__ == "__main__":

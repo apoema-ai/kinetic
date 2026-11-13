@@ -21,6 +21,11 @@ def _git(repo, *args) -> subprocess.CompletedProcess:
 
 def create_worktree(bare_or_repo, dest, branch: str, base: str) -> None:
     exists = _git(bare_or_repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
+    if not exists and not base.startswith("origin/"):
+        # a bare clone's local branches go stale; cut new branches from the fetched remote tip
+        bare = _git(bare_or_repo, "rev-parse", "--is-bare-repository")
+        if bare.returncode == 0 and bare.stdout.strip() == "true":
+            base = f"origin/{base}"
     args = ["worktree", "add", str(dest), branch] if exists else \
         ["worktree", "add", "-b", branch, str(dest), base]
     r = _git(bare_or_repo, *args)
