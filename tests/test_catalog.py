@@ -297,6 +297,33 @@ class CatalogApplyTest(unittest.TestCase):
         self.assertIsNone(json.loads((self.d / "ledger.json").read_text())["K-1"]["recipe"])
         self.assertTrue((self.d / "repos" / "A.md").is_file())
 
+    def test_apply_refuses_names_that_leave_the_catalog(self):
+        for bad in ("../escape", "a/b", "", ".hidden"):
+            ch = _change("K-1", ["A"], recipe=bad or "x")
+            if bad:
+                ch["deliverables"][0]["recipe"] = bad
+                ch["recipes"][0]["slug"] = bad
+            else:
+                ch["repos"][0]["repo"] = bad
+            before = self._snapshot()
+            with self.assertRaisesRegex(catalog.CatalogError, "invalid name"):
+                catalog.apply(self.d, ch, today="2026-11-13")
+            self.assertEqual(self._snapshot(), before)
+        self.assertFalse((self.d.parent / "escape.md").exists())
+
+    def test_cli_apply_missing_changes_file_exits_1(self):
+        old = catalog.SETTINGS
+        catalog.SETTINGS = self.d.parent / "settings.json"
+        self.addCleanup(setattr, catalog, "SETTINGS", old)
+        catalog.set_dir(str(self.d), path=catalog.SETTINGS)
+        before = self._snapshot()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = catalog.main(["apply", "--changes", str(self.d.parent / "nope.json")])
+        self.assertEqual(rc, 1)
+        self.assertIn("nope.json", err.getvalue())
+        self.assertEqual(self._snapshot(), before)
+
     def test_cli_apply_without_catalog_dir_exits_1(self):
         f = self.d.parent / "changes.json"
         f.write_text(json.dumps(_change("K-1", ["A"])))

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,8 @@ from kinetic.discover import _real, _write
 
 SETTINGS = Path.home() / ".config/kinetic/settings.json"
 LAYOUT = ("index.md", "terms.md", "repos", "recipes", "ledger.json")
+# Recipe slugs and repo names become file names: no separators, no leading dot.
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 class CatalogError(ValueError):
@@ -167,6 +170,12 @@ def apply(d, changes: dict, today: str) -> dict:
     for t in changes.get("terms", []):
         terms.setdefault(t["term"], {"meaning": t.get("meaning", ""),
                                      "synonyms": t.get("synonyms", []), "avoid": t.get("avoid", [])})
+    names = [r.get("slug", "") for r in changes.get("recipes", [])]
+    names += [dl["recipe"] for dl in changes.get("deliverables", []) if dl.get("recipe") is not None]
+    names += [r.get("repo", "") for r in changes.get("repos", [])]
+    bad = [n for n in names if not isinstance(n, str) or not NAME.fullmatch(n)]
+    if bad:
+        raise CatalogError(f"invalid name(s): {', '.join(map(repr, bad))}")
     new_recipes = {r["slug"]: r for r in changes.get("recipes", [])}
     keys = set()
     for dl in changes.get("deliverables", []):
@@ -368,6 +377,8 @@ def main(argv=None) -> int:
                 out = reindex(d)
             elif a.cmd == "apply":
                 import datetime
+                if not Path(a.changes).is_file():
+                    raise ValueError(f"no such change file: {a.changes}")
                 changes = config._load(Path(a.changes))
                 out = apply(d, changes, datetime.date.today().isoformat())
             else:
