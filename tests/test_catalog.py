@@ -207,5 +207,108 @@ class CatalogFilesTest(unittest.TestCase):
         self.assertTrue(any("onboard-asset-class.md" in x and "body" in x for x in catalog.lint(self.d)))
 
 
+def _change(key, repos, recipe="onboard-asset-class", what_for=None, new_terms=("warehouse",)):
+    ch = {
+        "deliverables": [{"key": key, "repos": list(repos), "prs": [f"https://x/{key}"], "recipe": recipe}],
+        "recipes": [],
+        "repos": [{"repo": r, "org": "acme", "terms": {"warehouse": [key]}} for r in repos],
+        "terms": [{"term": t, "meaning": t, "synonyms": [], "avoid": []} for t in new_terms],
+    }
+    if recipe:
+        ch["recipes"].append({"slug": recipe, "title": "Onboard an asset class",
+                              "when": "adding a new <ASSET_CLASS>",
+                              "parameters": [{"name": "ASSET_CLASS", "meaning": "class", "examples": []}],
+                              "terms": ["warehouse"],
+                              "what_for": what_for if what_for is not None else {r: [f"{r} work"] for r in repos}})
+    return ch
+
+
+class CatalogApplyTest(unittest.TestCase):
+    def setUp(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        self.d = Path(os.path.realpath(t.name)) / "cat"
+        catalog.init_layout(self.d)
+
+    def _snapshot(self):
+        return {str(p): (p.read_bytes(), p.stat().st_mtime_ns) for p in self.d.rglob("*") if p.is_file()}
+
+    def _recipe(self):
+        return catalog.read_doc(self.d / "recipes" / "onboard-asset-class.md")
+
+    def test_apply_creates_recipe_profiles_terms_and_ledger(self):
+        out = catalog.apply(self.d, _change("K-1", ["A"]), today="2026-11-13")
+        self.assertIn("recipes/onboard-asset-class.md", out["written"])
+        meta, body = self._recipe()
+        self.assertIn("## A (seen once, 1 of 1)", body)
+        self.assertEqual(meta["sources"], [{"key": "K-1", "prs": ["https://x/K-1"], "repos": ["A"]}])
+        self.assertEqual(catalog.read_doc(self.d / "repos" / "A.md")[0]["terms"], {"warehouse": ["K-1"]})
+        self.assertIn("warehouse", catalog.read_doc(self.d / "terms.md")[0]["terms"])
+        self.assertEqual(json.loads((self.d / "ledger.json").read_text())["K-1"],
+                         {"cataloged_at": "2026-11-13", "recipe": "onboard-asset-class", "repos": ["A"]})
+        self.assertIn("onboard-asset-class", (self.d / "index.md").read_text())
+        self.assertEqual(catalog.lint(self.d), [])
+
+    def test_apply_second_deliverable_raises_counts_and_adds_seen_once_repo(self):
+        catalog.apply(self.d, _change("K-1", ["A", "B"]), today="2026-11-13")
+        catalog.apply(self.d, _change("K-2", ["A", "B", "D"], new_terms=()), today="2026-11-14")
+        _, body = self._recipe()
+        self.assertIn("## A (always, 2 of 2)", body)
+        self.assertIn("## D (seen once, 1 of 2)", body)
+        self.assertEqual(catalog.read_doc(self.d / "repos" / "A.md")[0]["terms"], {"warehouse": ["K-1", "K-2"]})
+
+    def test_apply_keeps_what_for_of_repos_not_named(self):
+        catalog.apply(self.d, _change("K-1", ["A", "B"]), today="2026-11-13")
+        catalog.apply(self.d, _change("K-2", ["A"], what_for={"A": ["new A"]}, new_terms=()), today="2026-11-14")
+        meta, _ = self._recipe()
+        self.assertEqual(meta["what_for"], {"A": ["new A"], "B": ["B work"]})
+
+    def test_apply_refuses_key_already_in_ledger(self):
+        catalog.apply(self.d, _change("K-1", ["A"]), today="2026-11-13")
+        before = self._snapshot()
+        with self.assertRaisesRegex(catalog.CatalogError, "K-1"):
+            catalog.apply(self.d, _change("K-1", ["A"], new_terms=()), today="2026-11-14")
+        self.assertEqual(self._snapshot(), before)
+
+    def test_apply_refuses_unknown_term(self):
+        before = self._snapshot()
+        with self.assertRaisesRegex(catalog.CatalogError, "warehouse"):
+            catalog.apply(self.d, _change("K-1", ["A"], new_terms=()), today="2026-11-13")
+        self.assertEqual(self._snapshot(), before)
+
+    def test_apply_refuses_unknown_recipe_slug(self):
+        ch = _change("K-1", ["A"])
+        ch["recipes"] = []
+        before = self._snapshot()
+        with self.assertRaisesRegex(catalog.CatalogError, "onboard-asset-class"):
+            catalog.apply(self.d, ch, today="2026-11-13")
+        self.assertEqual(self._snapshot(), before)
+
+    def test_apply_refuses_when_catalog_file_is_broken(self):
+        (self.d / "repos" / "Z.md").write_text("---\n{bad\n---\n")
+        before = self._snapshot()
+        with self.assertRaises(catalog.CatalogError):
+            catalog.apply(self.d, _change("K-1", ["A"]), today="2026-11-13")
+        self.assertEqual(self._snapshot(), before)
+
+    def test_apply_deliverable_without_recipe_goes_to_ledger_only(self):
+        catalog.apply(self.d, _change("K-1", ["A"], recipe=None), today="2026-11-13")
+        self.assertEqual(list((self.d / "recipes").glob("*.md")), [])
+        self.assertIsNone(json.loads((self.d / "ledger.json").read_text())["K-1"]["recipe"])
+        self.assertTrue((self.d / "repos" / "A.md").is_file())
+
+    def test_cli_apply_without_catalog_dir_exits_1(self):
+        f = self.d.parent / "changes.json"
+        f.write_text(json.dumps(_change("K-1", ["A"])))
+        old = catalog.SETTINGS
+        catalog.SETTINGS = self.d.parent / "settings.json"
+        self.addCleanup(setattr, catalog, "SETTINGS", old)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = catalog.main(["apply", "--changes", str(f)])
+        self.assertEqual(rc, 1)
+        self.assertIn("catalog-setup", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

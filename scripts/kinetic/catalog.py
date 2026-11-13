@@ -159,6 +159,83 @@ def reindex(d) -> dict:
     return {"written": written + ["terms.md", "index.md"]}
 
 
+def apply(d, changes: dict, today: str) -> dict:
+    """Merge an approved change file. Everything is validated before any write."""
+    d = Path(d)
+    cat = load(d)  # raises CatalogError on a broken file before anything is written
+    terms = dict(cat["terms"])
+    for t in changes.get("terms", []):
+        terms.setdefault(t["term"], {"meaning": t.get("meaning", ""),
+                                     "synonyms": t.get("synonyms", []), "avoid": t.get("avoid", [])})
+    new_recipes = {r["slug"]: r for r in changes.get("recipes", [])}
+    keys = set()
+    for dl in changes.get("deliverables", []):
+        k = dl["key"]
+        if k in cat["ledger"] or k in keys:
+            raise CatalogError(f"deliverable {k} is already cataloged")
+        keys.add(k)
+        slug = dl.get("recipe")
+        if slug and slug not in new_recipes and slug not in cat["recipes"]:
+            raise CatalogError(f"deliverable {k} names unknown recipe '{slug}'")
+    used = [t for r in new_recipes.values() for t in r.get("terms", [])]
+    used += [t for r in changes.get("repos", []) for t in r.get("terms", {})]
+    unknown = sorted({t for t in used if t not in terms})
+    if unknown:
+        raise CatalogError(f"terms not in terms.md or the change: {', '.join(unknown)}")
+
+    recipes = {}
+    for slug, r in new_recipes.items():
+        meta = dict(cat["recipes"][slug][0]) if slug in cat["recipes"] else {"what_for": {}, "sources": []}
+        for f in ("title", "when", "parameters", "terms"):
+            if f in r:
+                meta[f] = r[f]
+        meta["slug"] = slug
+        meta["what_for"] = dict(meta.get("what_for", {}), **r.get("what_for", {}))
+        recipes[slug] = meta
+    ledger = dict(cat["ledger"])
+    for dl in changes.get("deliverables", []):
+        slug = dl.get("recipe")
+        if slug:
+            if slug not in recipes:
+                recipes[slug] = dict(cat["recipes"][slug][0])
+            meta = recipes[slug]
+            meta["sources"] = list(meta.get("sources", [])) + [
+                {"key": dl["key"], "prs": dl.get("prs", []), "repos": dl.get("repos", [])}]
+        ledger[dl["key"]] = {"cataloged_at": today, "recipe": slug or None, "repos": dl.get("repos", [])}
+    repos = {}
+    for r in changes.get("repos", []):
+        name = r["repo"]
+        meta = dict(repos.get(name) or cat["repos"].get(name) or {"repo": name, "terms": {}})
+        meta["repo"] = name
+        if r.get("org"):
+            meta["org"] = r["org"]
+        if r.get("owns"):
+            meta["owns"] = r["owns"]
+        merged = {t: list(k) for t, k in meta.get("terms", {}).items()}
+        for t, ks in r.get("terms", {}).items():
+            merged[t] = merged.get(t, []) + [k for k in ks if k not in merged.get(t, [])]
+        meta["terms"] = merged
+        meta["updated"] = today
+        repos[name] = meta
+
+    written = []
+    for slug, meta in recipes.items():
+        meta["updated"] = today
+        write_doc(d / "recipes" / f"{slug}.md", meta, render_recipe(meta))
+        cat["recipes"][slug] = (meta, "")
+        written.append(f"recipes/{slug}.md")
+    for name, meta in repos.items():
+        write_doc(d / "repos" / f"{name}.md", meta, render_repo(meta))
+        cat["repos"][name] = meta
+        written.append(f"repos/{name}.md")
+    if terms != cat["terms"]:
+        write_doc(d / "terms.md", {"terms": terms}, render_terms(terms))
+        written.append("terms.md")
+    _write(d / "ledger.json", ledger)
+    (d / "index.md").write_text(render_index(cat))
+    return {"written": written + ["ledger.json", "index.md"]}
+
+
 def lint(d) -> list:
     d = Path(d)
     problems = []
@@ -276,9 +353,11 @@ def main(argv=None) -> int:
     sp.add_argument("--keys", action="extend", nargs="+", required=True)
     sub.add_parser("index")
     sub.add_parser("lint")
+    sp = sub.add_parser("apply")
+    sp.add_argument("--changes", required=True)
     a = p.parse_args(argv)
     try:
-        if a.cmd in ("ledger", "index", "lint"):
+        if a.cmd in ("ledger", "index", "lint", "apply"):
             d = show(SETTINGS)
             if not d:
                 print("no catalog folder set; run /kinetic:catalog-setup", file=sys.stderr)
@@ -287,6 +366,10 @@ def main(argv=None) -> int:
                 out = ledger_lookup(d, a.keys)
             elif a.cmd == "index":
                 out = reindex(d)
+            elif a.cmd == "apply":
+                import datetime
+                changes = config._load(Path(a.changes))
+                out = apply(d, changes, datetime.date.today().isoformat())
             else:
                 problems = lint(d)
                 print(json.dumps({"problems": problems}))
