@@ -85,6 +85,29 @@ class DiscoverTest(unittest.TestCase):
         self.assertEqual([(r["name"], r["path"]) for r in out], [("api", str(self.root / "api"))])
         self.assertEqual(discover.scan([str(self.root / "api" / "src")], central=self.repos_json), [])
 
+    def _commit_and_clone_bare(self, dest: Path) -> None:
+        src = self.root / "api"
+        for k, v in (("user.name", "t"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            subprocess.run(["git", "-C", str(src), "config", k, v], check=True)
+        (src / "a.txt").write_text("x\n")
+        subprocess.run(["git", "-C", str(src), "add", "a.txt"], check=True)
+        subprocess.run(["git", "-C", str(src), "commit", "-q", "-m", "c"], check=True)
+        subprocess.run(["git", "clone", "-q", "--bare", str(src), str(dest)], check=True)
+
+    def test_scan_lists_bare_child_with_bare_flag(self):
+        self._commit_and_clone_bare(self.root / "svc.git")
+        items = {i["name"]: i for i in discover.scan([str(self.root)], central=self.repos_json)}
+        self.assertTrue(items["svc.git"]["bare"])
+        self.assertFalse(items["web"]["bare"])
+        self.assertEqual(items["svc.git"]["remote"], str(self.root / "api"))
+
+    def test_scan_root_that_is_a_bare_repo(self):
+        bare_root = self.tmp / "solo.git"
+        self._commit_and_clone_bare(bare_root)
+        out = discover.scan([str(bare_root)], central=self.repos_json)
+        self.assertEqual([i["path"] for i in out], [str(bare_root)])
+        self.assertTrue(out[0]["bare"])
+
     def test_scan_reports_remote(self):
         out = {r["name"]: r for r in discover.scan([str(self.root)], central=self.repos_json)}
         self.assertEqual(out["api"]["remote"], "git@github.com:acme/api.git")
