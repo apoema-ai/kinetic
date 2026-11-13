@@ -6,7 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, "/Users/rmendes/workspace/lab/kinetic/scripts")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from kinetic import catalog  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp())
