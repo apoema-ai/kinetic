@@ -399,6 +399,9 @@ Ship fills one template for every PR. The default is `templates/pr-body.md`. To 
 | `/kinetic:status [run-dir]` | Phase, tickets, frontier and gates of a run (the active one by default) |
 | `/kinetic:ask` | The lanes and the next step `next_step` computes for the active run |
 | `/kinetic:cleanup [run-dir]` | Removes the run's local worktrees and branches whose work is merged, after one confirmation |
+| `/kinetic:bare-setup [folder]` | Detects and saves the folder that holds your bare clones |
+| `/kinetic:bare-clone <org>/<name> ... \| <url> <name>` | Makes bare clones in that folder |
+| `/kinetic:bare-refresh [repo ...]` | Fetches into the bare clones and reports what advanced |
 
 ## Skills and agents
 
@@ -408,6 +411,9 @@ Ship fills one template for every PR. The default is `templates/pr-body.md`. To 
 | `implement` | command | sonnet | `run --from build` |
 | `init`, `doctor`, `status`, `ask` | commands | sonnet, haiku, haiku, haiku | Setup and read-only views |
 | `cleanup` | command | sonnet | Removes merged worktrees and branches of a run |
+| `bare-setup` | command | sonnet | Detects, asks and saves the bare-clones folder (`bare_dir`) |
+| `bare-clone` | command | sonnet | Bare-clones `<org>/<name>` or a URL into that folder |
+| `bare-refresh` | command | sonnet | Fetches into the bare clones; local branches never move |
 | `grill` | phase skill | inline | Interview covering threat model and non-functional requirements; keeps the glossary and ADR drafts |
 | `discover` | phase skill | inline | Finds the run's repos from approved sources (base folders, your sources, the GitHub org), confirms them with you, registers them and cuts their worktrees |
 | `specify` | phase skill | inline | Spec with testing decisions, linted by `spec_lint`, published to Jira or `<run_dir>/spec.md` |
@@ -464,11 +470,14 @@ A repo-root `.kinetic.json` with the same keys overrides the central entry key b
   "tracker_settings": { "jira_project": "INV", "slice_issue_type": "Story", "child_issue_type": "Sub-task" },
   "workspace_root": "~/workspace/kinetic-runs",
   "repo_roots": ["/Users/me/code"],
-  "github_orgs": ["acme"]
+  "github_orgs": ["acme"],
+  "bare_dir": "/Users/me/workspace/master/.bare"
 }
 ```
 
 `repo_roots` (folders whose child repos discovery may scan) and `github_orgs` (orgs discovery may search) are written by the discover phase when you approve them, and offered as defaults on the next run. Missing keys mean none.
+
+`bare_dir` is the folder that holds your bare clones, one per subfolder; `/kinetic:bare-setup` writes it. Unset means no change in behavior. Once saved, `discover` uses it as a source and fetches the clones that match its repos (saving it is consent for those fetches), and a run's worktrees of those clones are cut from `origin/<base>`.
 
 The 0.2.0 top-level `jira_project`, `slice_issue_type` and `child_issue_type` keys are still read. With `"tracker": "local"` (or no `tracker` key) tickets are files under `<run_dir>/issues/`. See [Trackers](#trackers) for the other trackers, `tracker_settings` and `tracker_names`, and [The PR template override](#the-pr-template-override) for `pr_template`.
 

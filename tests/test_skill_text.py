@@ -16,9 +16,10 @@ CLAUDE_ONLY_TOOLS = ("AskUserQuestion", "SendMessage", "run_in_background")
 # as the Claude/Devin default.
 CONCRETE_MODEL = re.compile(r"\b(sonnet|opus|haiku|gpt-[\w.-]+|claude-[\w.-]+)\b")
 
-# The five user-only skills carry both invocation keys; no other skill may
+# The user-only skills carry both invocation keys; no other skill may
 # carry triggers: (doctor keeps only disable-model-invocation, per rulings).
-USER_ONLY_SKILLS = ("ask", "cleanup", "implement", "init", "run", "status")
+USER_ONLY_SKILLS = ("ask", "bare-clone", "bare-refresh", "bare-setup", "cleanup",
+                    "implement", "init", "run", "status")
 
 # Spec model tiers: implementer and fix-reviewer are standard; the reviewers and
 # implementer-strong are strong. model: stays as the Claude/Devin default
