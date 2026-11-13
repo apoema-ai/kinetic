@@ -14,6 +14,10 @@ Never assume an agent from a previous session is alive. Re-derive everything fro
 3. Tickets with a report file but still `running`: read the report's first lines and handle it as a return (`build-loop.md`, "On each implementer return").
 4. `kinetic next_step --run <run_dir>` prints the suggested next command and why; use it to confirm where to continue.
 
+## Discover phase
+
+A run recorded in `discover` resumes from `<run_dir>/discovery.md` and `state.repos`: repos already in state keep their worktrees, and the skill continues from the first step whose result is missing. When a later discover pass (after a re-grill or a rejected spec gate) drops a repo, run `kinetic state remove-repo --run <run_dir> --name <repo>` (refused while a ticket names it), then `git -C <repo-path> worktree remove <run_dir>/worktrees/<repo>`.
+
 ## Continue
 
 Before resuming in a new session, rewrite the pointer with the same `printf '%s' <run_dir> | tee ~/.config/kinetic/active-run` command from `run/SKILL.md`: that claims the run for this session, so the hooks act here and stop acting in the old one. Resume at the recorded phase: re-read the guide for that phase and continue from the first unfinished step. Gates already recorded approved stay approved; a gate not recorded is asked again. If the phase is `build`, start a round with `kinetic.frontier`. If the user wants to abandon the run, `rm -f ~/.config/kinetic/active-run` only on their say-so.

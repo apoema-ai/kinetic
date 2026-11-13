@@ -10,7 +10,7 @@ Access: files only. No `tracker` key in settings means local. Tickets are readab
 Create the slice folder `<run_dir>/issues/` and its `README.md` with `kinetic board render`. The folder is the parent reference.
 
 ### create child
-Record the ticket in state (the tickets phase writes it into the run's state), then `kinetic board header` writes its file, then `kinetic board render`.
+Record the ticket in state (the decompose phase writes it into the run's state), then `kinetic board header` writes its file, then `kinetic board render`.
 
 ### link blocker
 Record `blocked_by` with its edge type in state, then `header` for the ticket.

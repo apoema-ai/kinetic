@@ -17,10 +17,15 @@ Run this outside the session that owns the active run: in that session the isola
 
 ## Steps
 
-1. **Repos.** Use the paths in the arguments; if none, ask which repo paths to register. The default name of each repo is its directory basename; the user may override it.
+1. **Repos.** Use the paths in the arguments. With none, use the current directory: run `kinetic discover scan --enclosing --root "$PWD"`.
+   - The current directory is inside a git repo: the scan returns that one repo (its top level); register it.
+   - It is a folder holding git repos: ask which to register, all pre-selected. Also ask whether to save the folder as a repo root for discovery; on yes, `kinetic discover remember --root "$PWD"`.
+   - The scan returns nothing: ask which repo paths to register.
+
+   The default name of each repo is its directory basename; the user may override it.
 2. **Detect.** Run `kinetic detect_repos PATH [PATH ...]`. It prints JSON `{path: {"verify": ..., "marker": ...}}`.
 3. **Confirm verify.** Ask only about repos whose `verify` is null (ask for the command) or looks unusual (confirm it). Accept the rest silently.
-3b. **Snapshots.** For each repo ask, one at a time and only if it publishes snapshot builds other repos consume: the `publish_snapshot` command (builds and publishes a snapshot) and the `pin` command (run in the downstream repo; it reads `KINETIC_UPSTREAM_REF`). Leave both unset otherwise: the tickets phase then uses `merge` edges between repos instead of `snapshot` edges.
+3b. **Snapshots.** For each repo ask, one at a time and only if it publishes snapshot builds other repos consume: the `publish_snapshot` command (builds and publishes a snapshot) and the `pin` command (run in the downstream repo; it reads `KINETIC_UPSTREAM_REF`). Leave both unset otherwise: the decompose phase then uses `merge` edges between repos instead of `snapshot` edges.
 4. **Tracker.** Four questions, one at a time:
    1. Which tracker: `jira`, `github`, `linear`, `local` or `other`. Recommend `jira` if the Atlassian MCP is connected, `github` if the repos are on GitHub.
    2. That tracker's required settings (read its adapter, `trackers/<name>.md`). For `other`, also ask for a short description of the tracker and how to reach it; it is written as top-level `tracker_description`, which resolve requires.

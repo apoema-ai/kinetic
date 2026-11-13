@@ -1,6 +1,6 @@
 ---
-name: tickets
-description: Break the approved spec into vertical slices (parent tickets) and per-repo child tickets with typed blocking edges, publish them, and record them in run state. Use at the tickets phase of a kinetic run.
+name: decompose
+description: Break the approved spec into vertical slices (parent tickets) and per-repo child tickets with typed blocking edges, publish them, and record them in run state. Use at the decompose phase of a kinetic run.
 model: sonnet
 ---
 
@@ -8,7 +8,9 @@ model: sonnet
 
 Break the spec into **slices** (tracer-bullet vertical slices, each a parent ticket) and, per slice, one **child ticket per repo** it touches. The child ticket is the unit an agent implements; the slice stays the unit you demo and verify. This skill never invokes another skill.
 
-The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`), the spec location and the list of repos in play. Run scripts as `kinetic <module> ...`.
+The orchestrator passes `Run: <dir>` (the run directory, `<workspace>/<run-id>/`) and the spec location. The repos in play are the run's repos: `kinetic state load --run <dir>` lists them under `repos`, each with its integration worktree path. Explore code there, not in the user's own checkouts. `<dir>/discovery.md` says why each repo is in the run.
+
+Every agent ticket's repo must be one of the run's repos; `graph validate` reports any other as an error. If the slicing shows another repo is needed, stop and tell the orchestrator which repo and why: it runs discover for it and brings you back. Run scripts as `kinetic <module> ...`.
 
 Resolve the tracker with `kinetic tracker resolve` (set by `/kinetic:init`; with no tracker configured it resolves to local), read the adapter file it names, and follow its operations by name ("create slice parent", "create child", "link blocker", "link after", "link ships-with", "link related", "set kind", "assign to user", "fetch", ...). Tracker-specific names come from the resolve output: `names.kind.human`, `names.edge.<type>`, `names.after`, `names.ships_with`, `names.related`. Do not hard-code them.
 

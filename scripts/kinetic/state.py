@@ -16,7 +16,7 @@ STATUSES = ("todo", "running", "done", "done_with_concerns", "needs_decision",
             "blocked", "merged", "released")
 
 
-PHASES = ("intake", "grill", "spec", "tickets", "build", "review", "ship", "retro", "done")
+PHASES = ("intake", "grill", "discover", "specify", "decompose", "build", "review", "ship", "retro", "done")
 EDGE_TYPES = ("snapshot", "merge", "release")
 
 
@@ -28,8 +28,15 @@ def _file(run_dir) -> Path:
     return Path(run_dir) / "state.json"
 
 
+# phase names before 0.4.0; runs recorded in them read as the new names
+OLD_PHASES = {"spec": "specify", "tickets": "decompose"}
+
+
 def load(run_dir) -> dict:
-    return json.loads(_file(run_dir).read_text())
+    st = json.loads(_file(run_dir).read_text())
+    if st.get("phase") in OLD_PHASES:
+        st["phase"] = OLD_PHASES[st["phase"]]
+    return st
 
 
 def atomic_write(path, text: str) -> None:
@@ -158,6 +165,7 @@ def ship_refusal(state: dict, run_dir) -> str | None:
 
 
 def set_phase(run_dir, phase: str) -> dict:
+    phase = OLD_PHASES.get(phase, phase)
     if phase not in PHASES:
         raise ValueError(f"invalid phase '{phase}': expected one of {PHASES}")
 
@@ -276,6 +284,31 @@ def set_repo(run_dir, name: str, path: str, integration_branch: str) -> dict:
     return _mutate(run_dir, fn)
 
 
+def set_lane(run_dir, lane: str) -> dict:
+    """Move between feature and epic (same phases); quick is fixed at intake."""
+    if lane not in LANES:
+        raise ValueError(f"invalid lane '{lane}': expected one of {LANES}")
+
+    def fn(s):
+        if lane != s["lane"] and "quick" in (lane, s["lane"]):
+            raise ValueError(f"cannot change lane from {s['lane']} to {lane}: quick is fixed at intake")
+        s["lane"] = lane
+
+    return _mutate(run_dir, fn)
+
+
+def remove_repo(run_dir, name: str) -> dict:
+    def fn(s):
+        if name not in s["repos"]:
+            raise ValueError(f"repo '{name}' is not in the run")
+        users = sorted(i for i, t in s["tickets"].items() if t.get("repo") == name)
+        if users:
+            raise ValueError(f"repo '{name}' is still named by tickets: {', '.join(users)}")
+        del s["repos"][name]
+
+    return _mutate(run_dir, fn)
+
+
 def record_verify(run_dir, ticket_id, exit_code: int, log_path: str, repo_name=None,
                   at: str | None = None) -> None:
     if ticket_id is None and not repo_name:
@@ -323,8 +356,12 @@ def record_gate(run_dir, gate: str, approved: bool, note: str = "") -> None:
             reason = ship_refusal(s, run_dir)
             if reason:
                 raise ValueError(reason)
-        s["gates"].__setitem__(
-            gate, {"approved": approved, "note": note, "at": _now()})
+        rec = {"approved": approved, "note": note, "at": _now()}
+        # the breakdown grant, once given, survives a later rejection of a re-asked gate
+        granted = (s["gates"].get(gate) or {}).get("granted_at")
+        if gate == "breakdown" and (granted or approved):
+            rec["granted_at"] = granted or rec["at"]
+        s["gates"][gate] = rec
 
     _mutate(run_dir, fn)
 
@@ -381,6 +418,8 @@ def main(argv=None) -> int:
     cmd("human-done", ("--id", {"required": True}), ("--note", {"default": None}))
     cmd("set-repo", ("--name", {"required": True}), ("--path", {"required": True}),
         ("--integration-branch", {"required": True}))
+    cmd("set-lane", ("--lane", {"required": True}))
+    cmd("remove-repo", ("--name", {"required": True}))
     cmd("record-verify", ("--ticket", {"default": None}), ("--exit-code", {"type": int, "required": True}),
         ("--log-path", {"required": True}), ("--repo-name", {"default": None}),
         ("--at", {"default": None}))
@@ -408,6 +447,10 @@ def main(argv=None) -> int:
             out = human_done(a.run, a.id, a.note)
         elif a.cmd == "set-repo":
             out = set_repo(a.run, a.name, a.path, a.integration_branch)
+        elif a.cmd == "set-lane":
+            out = set_lane(a.run, a.lane)
+        elif a.cmd == "remove-repo":
+            out = remove_repo(a.run, a.name)
         elif a.cmd == "record-verify":
             record_verify(a.run, a.ticket, a.exit_code, a.log_path, a.repo_name, a.at)
             out = load(a.run)["verify"]

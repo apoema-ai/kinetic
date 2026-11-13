@@ -1,6 +1,6 @@
 # Kinetic
 
-Kinetic is an SDLC pipeline (grill, spec, tickets, multi-repo build, review, ship, retro) that runs inside a coding agent and drives work through an issue tracker.
+Kinetic is an SDLC pipeline (grill, discover, specify, decompose, multi-repo build, review, ship, retro) that runs inside a coding agent and drives work through an issue tracker.
 
 ## Harnesses
 
@@ -29,3 +29,13 @@ _Avoid_: Model name (sonnet, opus) in agent definitions, size, class
 **Tracker adapter**:
 The per-tracker instructions (GitHub, Jira, Linear, local, other) that tell kinetic how to read and write tickets in one issue tracker.
 _Avoid_: Adapter (unqualified), integration
+
+## Repos
+
+**Repo root**:
+A folder whose direct child git repos the discover phase may scan, saved as `repo_roots` in `settings.json` once the user approves it.
+_Avoid_: Workspace, base dir, code folder
+
+**Discovery**:
+The phase that settles which repos a run touches, from sources the user approves, and cuts their integration worktrees.
+_Avoid_: Repo detection, repo lookup

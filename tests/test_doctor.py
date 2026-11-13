@@ -12,7 +12,7 @@ from unittest import mock
 
 from kinetic import doctor, harness, install
 
-SKILLS = ["find-ticket-repos", "checkout-ticket-repos", "resolving-merge-conflicts"]
+SKILLS = ["resolving-merge-conflicts"]
 PLUGINS = ["superpowers", "dev-fleet"]
 
 
@@ -126,15 +126,20 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(c["gh-auth"]["status"], "fail")
         self.assertIn("timed out", c["gh-auth"]["fix"])
 
+    def test_dropped_companions_are_not_checked(self):
+        c = self._by_name()
+        self.assertNotIn("skill:find-ticket-repos", c)
+        self.assertNotIn("skill:checkout-ticket-repos", c)
+
     def test_missing_skill_warns(self):
         self._install_all_skills()
         c = self._by_name()
         for n in SKILLS + PLUGINS:
             self.assertEqual(c["skill:" + n]["status"], "pass", n)
-        (self.home / ".claude/skills/find-ticket-repos/SKILL.md").unlink()
+        (self.home / ".claude/skills/resolving-merge-conflicts/SKILL.md").unlink()
         (self.home / ".claude/plugins/cache/mkt/dev-fleet").rmdir()
         c = self._by_name()
-        self.assertEqual(c["skill:find-ticket-repos"]["status"], "warn")
+        self.assertEqual(c["skill:resolving-merge-conflicts"]["status"], "warn")
         self.assertEqual(c["skill:dev-fleet"]["status"], "warn")
         self.assertEqual(c["skill:superpowers"]["status"], "pass")
 
@@ -276,7 +281,7 @@ class DoctorTest(unittest.TestCase):
         self.assertNotIn("tier-mapping", c)
         self._install_all_skills()
         c = self._by_name()
-        self.assertEqual(c["skill:find-ticket-repos"]["status"], "pass")
+        self.assertEqual(c["skill:resolving-merge-conflicts"]["status"], "pass")
 
     def test_install_manifest_freshness(self):
         c = self._by_name()
@@ -528,8 +533,8 @@ class DoctorTest(unittest.TestCase):
         clone = self._fake_clone("codex-clone")
         self._write_settings(harness="codex", clone=str(clone))
         c = self._by_name()
-        self.assertEqual(c["skill:find-ticket-repos"]["status"], "warn")
-        self.assertIn(".agents/skills", c["skill:find-ticket-repos"]["fix"])
+        self.assertEqual(c["skill:resolving-merge-conflicts"]["status"], "warn")
+        self.assertIn(".agents/skills", c["skill:resolving-merge-conflicts"]["fix"])
 
         for s in SKILLS:
             d = self.home / ".agents/skills" / s
@@ -639,9 +644,9 @@ class DoctorTest(unittest.TestCase):
             self.assertEqual(c[n]["status"], "pass", (n, c[n]))
         self.assertNotIn("hooks-trusted", c)
         # companion fix text keeps the claude skill dir
-        (self.home / ".claude/skills/find-ticket-repos/SKILL.md").unlink()
+        (self.home / ".claude/skills/resolving-merge-conflicts/SKILL.md").unlink()
         c = self._by_name()
-        self.assertIn("~/.claude/skills", c["skill:find-ticket-repos"]["fix"])
+        self.assertIn("~/.claude/skills", c["skill:resolving-merge-conflicts"]["fix"])
 
     # --- devin harness checks ---
 

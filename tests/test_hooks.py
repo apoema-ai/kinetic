@@ -28,9 +28,11 @@ class HookCase(unittest.TestCase):
         self.repo = Path(os.path.realpath(self.tmp.name)) / "repo"
         self.repo.mkdir()
 
-    def activate(self):
+    def activate(self, granted=True):
         state.init(self.run_dir, "feature", "X-1")
         state.set_repo(self.run_dir, "api", str(self.repo), "main")
+        if granted:
+            state.record_gate(self.run_dir, "breakdown", True)
         ptr = self.home / ".config" / "kinetic"
         ptr.mkdir(parents=True)
         (ptr / "active-run").write_text(str(self.run_dir))
@@ -207,6 +209,34 @@ class Isolation(HookCase):
                         {"file_path": "sub/a.py"}):
             out = self.hook("isolation", {"tool_input": payload, "cwd": str(self.repo)})
             self.assertIsNone(out, payload)
+
+    def test_isolation_denies_repo_before_breakdown_gate(self):
+        self.activate(granted=False)
+        out = self.hook("isolation", {"tool_name": "Write", "tool_input": {"file_path": str(self.repo / "a.py")}})
+        self.assertEqual(self.decision(out), "deny")
+        self.assertNotIn(str(self.repo) + ",", out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_isolation_allows_run_dir_before_breakdown_gate(self):
+        self.activate(granted=False)
+        out = self.hook("isolation", {"tool_name": "Write", "tool_input": {"file_path": str(self.run_dir / "spec.md")}})
+        self.assertIsNone(self.decision(out))
+
+    def test_isolation_denies_run_worktrees_before_breakdown_gate(self):
+        # the real layout: discover cuts worktrees inside the run directory
+        self.activate(granted=False)
+        wt = self.run_dir / "worktrees" / "api"
+        state.set_repo(self.run_dir, "api", str(wt), "kinetic/X-1/integration")
+        for path in (wt / "a.py", self.run_dir / "worktrees" / "api-T1" / "b.py"):
+            out = self.hook("isolation", {"tool_name": "Write", "tool_input": {"file_path": str(path)}})
+            self.assertEqual(self.decision(out), "deny", path)
+
+    def test_isolation_keeps_grant_after_a_later_rejected_gate(self):
+        self.activate()  # breakdown approved
+        wt = self.run_dir / "worktrees" / "api"
+        state.set_repo(self.run_dir, "api", str(wt), "kinetic/X-1/integration")
+        state.record_gate(self.run_dir, "breakdown", False, "revise")
+        out = self.hook("isolation", {"tool_name": "Write", "tool_input": {"file_path": str(wt / "a.py")}})
+        self.assertIsNone(self.decision(out))
 
     def test_isolation_denies_prefix_sibling(self):
         self.activate()

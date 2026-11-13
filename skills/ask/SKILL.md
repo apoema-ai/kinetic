@@ -14,9 +14,9 @@ Print the following, then the next step.
 
 | Lane | When | Phases |
 |---|---|---|
-| quick | One small ticket, one repo, no design decisions | implement, verify, review, ship |
-| feature | One repo, needs a spec | grill, spec, tickets, build, review, ship, retro |
-| epic | Several repos | all phases, with repo detection, typed edges, per-repo integration branches |
+| quick | One small ticket, one repo known at intake, no design decisions | intake, discover, build, review, ship, retro |
+| feature | One repo, needs a spec | grill, discover, specify, decompose, build, review, ship, retro |
+| epic | Several repos | all phases; discover finds the repos; typed edges, per-repo integration branches |
 
 ## What you have and where `/kinetic:run` starts
 

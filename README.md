@@ -87,11 +87,11 @@ On Codex CLI the installer is file generation only: it writes `kntc-<name>` stub
 
 On OpenCode the installer is also file generation only: it writes flat `kntc-<name>.md` stub skills under `~/.config/opencode/skills` (user-only skills carry `disable-model-invocation: true`, which OpenCode honours natively), markdown agents under `~/.config/opencode/agents/*.md` with `mode: subagent`, the tier resolved to `model` (override via `tiers.opencode` in `settings.json`), and `permissions` deny rules translated from each agent's `tools:` allow-list, and drops a dependency-free TypeScript plugin at `~/.config/opencode/plugins/kinetic.ts` that forwards tool/session events to the Python hooks — deny by throwing in `tool.execute.before`, ask via `permission.evaluate`, edit recording via `execute.after`, orientation via the session `context` hook, and a bounded verify re-prompt on `experimental.idle`. OpenCode file-drops plugins: no `opencode.json` edit and no trust step. OpenCode support is validated by the manual checklist in `docs/smoke/opencode.md`; known limitations: the idle re-prompt is best-effort (the `experimental.idle` API is experimental and bounded to three rounds per session), so `verify-before-stop` stays Instructed there while `verify`/`ship` refusing stale verify is Enforced at the CLI layer on every harness.
 
-Optional companions that kinetic uses when present and falls back without: the `find-ticket-repos`, `checkout-ticket-repos` and `resolving-merge-conflicts` skills and the `superpowers` and `dev-fleet` plugins, installed wherever the harness keeps skills and plugins (`~/.claude/skills` and `~/.claude/plugins` on Claude Code; `~/.config/devin/skills` or `~/.agents/skills` and `devin plugins install` on Devin CLI). `/kinetic:doctor` reports which are missing.
+Optional companions that kinetic uses when present and falls back without: the `resolving-merge-conflicts` skill and the `superpowers` and `dev-fleet` plugins, installed wherever the harness keeps skills and plugins (`~/.claude/skills` and `~/.claude/plugins` on Claude Code; `~/.config/devin/skills` or `~/.agents/skills` and `devin plugins install` on Devin CLI). `/kinetic:doctor` reports which are missing.
 
 ## Quick start
 
-1. `/kinetic:init ~/code/api ~/code/web` registers the repos, detects each one's verify command, asks for the tracker (Jira, GitHub, Linear, local or other) and writes `~/.config/kinetic/`. It ends by running doctor.
+1. `/kinetic:init ~/code/api ~/code/web` (or `/kinetic:init` alone, from inside a repo or a folder of repos) registers the repos, detects each one's verify command, asks for the tracker (Jira, GitHub, Linear, local or other) and writes `~/.config/kinetic/`. It ends by running doctor.
 2. `/kinetic:run "let partners export statements as CSV"` (or a Jira key, or a path to a spec) starts a run. kinetic picks a lane, says why in one line, and lets you override it.
 3. Answer the grill questions, approve the spec, approve the ticket breakdown. From there implementers work in the background; you are asked only when one needs a decision.
 4. Approve the ship gate. kinetic pushes the integration branches and opens one draft PR per repo, in merge order.
@@ -104,13 +104,15 @@ At any point `/kinetic:status` shows where the run is, and `/kinetic:ask` prints
 ```text
   idea / Jira key / spec
           |
-       [intake] -- pick lane, detect repos
+       [intake] -- pick lane when the repos are known
           |
        [grill] -- interview; GLOSSARY.md and ADR drafts in <run_dir>/docs/
           |
-       [spec] -- spec_lint must pass ---------------> GATE: spec
+     [discover] -- candidate repos, approved sources, worktrees; final lane
           |
-      [tickets] -- slices, per-repo tickets, typed edges
+     [specify] -- spec_lint must pass ---------------> GATE: spec
+          |
+   [decompose] -- slices, per-repo tickets, typed edges
           |      graph validate must be clean ------> GATE: breakdown (records the grant)
           |
        [build] -- frontier -> implementer per ticket (background, own worktree)
@@ -134,18 +136,18 @@ At any point `/kinetic:status` shows where the run is, and `/kinetic:ask` prints
 
 | Lane | When | Phases |
 |---|---|---|
-| `quick` | One small ticket, one repo, no design decisions | intake, build, review, ship, retro |
-| `feature` | One repo, needs a spec | grill, spec, tickets, build, review, ship, retro |
+| `quick` | One small ticket, one repo known at intake, no design decisions | intake, discover, build, review, ship, retro |
+| `feature` | One repo, needs a spec | grill, discover, specify, decompose, build, review, ship, retro |
 | `epic` | Several repos | all phases; per-repo integration branches, typed edges |
 
-The quick lane has no grill, spec or tickets phase. Its breakdown gate is a single question that also asks which seams the tests may use, because a background implementer has no one to ask.
+The quick lane has no grill, spec or decompose phase. Its breakdown gate is a single question that also asks which seams the tests may use, because a background implementer has no one to ask.
 
 A run starts at the first missing artifact:
 
 | You have | The run starts at |
 |---|---|
 | An idea or a bare ticket | grill |
-| A spec, no tickets | tickets (repo detection first) |
+| A spec, no tickets | discover |
 | A spec and tickets with edges | build |
 | One small ticket, no spec | the quick lane |
 
@@ -195,9 +197,10 @@ Starting from a ticket file instead: `/kinetic:implement ~/notes/fix-dates.md` r
 
 Here the tracker is Jira, so ticket ids are Jira keys and the run id is `INV-4321`.
 
-1. **Intake.** kinetic reads the Jira issue and detects three repos: `statement-client` (a library), `api` and `web`. "Epic lane: three repos."
-2. **Grill and spec.** As in the feature lane, but the spec also covers how the repos interact. It is published as a Jira issue under project `INV`, and its key is noted at the top of `spec.md`. Spec gate.
-3. **Tickets, then breakdown gate.** One slice, with one child ticket per repo, linked with Jira "blocks" links and edge labels:
+1. **Intake.** kinetic reads the Jira issue. It names only `api`, so the repo set is not known yet: provisional `feature` lane, start at the grill.
+2. **Grill, then discover.** The grill settles what the change is and names the interface `StatementClient.export`. Discover asks once: use the saved base folder `~/code`, any other source, and may it search the GitHub org `acme`? It scans `~/code`, and a code search for `StatementClient.export` finds `statement-client` (a library) and `web`. You confirm all three; discover cuts their integration worktrees and sets the lane: "Epic lane: three repos."
+3. **Spec.** As in the feature lane, but the spec also covers how the repos interact. It is published as a Jira issue under project `INV`, and its key is noted at the top of `spec.md`. Spec gate.
+4. **Tickets, then breakdown gate.** One slice, with one child ticket per repo, linked with Jira "blocks" links and edge labels:
 
    | Ticket | Repo | Blocked by |
    |---|---|---|
@@ -205,18 +208,18 @@ Here the tracker is Jira, so ticket ids are Jira keys and the run id is `INV-432
    | INV-4323 | api | INV-4322 (`snapshot`) |
    | INV-4324 | web | INV-4323 (`merge`) |
 
-   `INV-4322` produces `StatementClient.export`, which `INV-4323` consumes; `graph validate` would reject the breakdown if `INV-4323` were not blocked by `INV-4322`. The `snapshot` edge is allowed because `statement-client` has `publish_snapshot` and `api` has `pin` in `repos.json`. Without them, the tickets phase would use a `merge` edge. You approve the breakdown and the grant.
-4. **Build.** Each repo gets its own integration branch `kinetic/INV-4321/integration`.
+   `INV-4322` produces `StatementClient.export`, which `INV-4323` consumes; `graph validate` would reject the breakdown if `INV-4323` were not blocked by `INV-4322`. The `snapshot` edge is allowed because `statement-client` has `publish_snapshot` and `api` has `pin` in `repos.json`. Without them, the decompose phase would use a `merge` edge. You approve the breakdown and the grant.
+5. **Build.** Each repo has its own integration branch `kinetic/INV-4321/integration`, cut at discover.
    - Round 1: only `INV-4322` is ready. Its implementer adds the client method. After review it merges into `statement-client`'s integration branch, and `kinetic.gitops pin` publishes the snapshot and pins `api` to it.
    - Round 2: `INV-4323` is ready. Its worktree is cut from `api`'s integration branch, which now carries the pin, so the implementer builds against the new client.
    - Round 3: once `INV-4323` merges into `api`'s integration branch, `INV-4324` starts in `web`.
 
    If an implementer returns `NEEDS_DECISION` (say, "paginate the export or stream it?"), you answer once. The answer is recorded as a ruling and the same implementer resumes.
-5. **Review.** Architecture and security review per repo. A confirmed finding in `api` becomes the fix ticket `api-review-1`, built through the same loop. Every changed repo is verified again.
-6. **Ship gate, then ship.** The merge order is `statement-client, api, web`. kinetic opens three draft PRs in that order, titled `INV-4321: <title>`. `api`'s PR lists the `statement-client` PR under Depends on, and has a warning that its snapshot pin must move to a released version before merge. After the last PR exists, the first two are updated so their Related PRs list all three.
-7. **Retro.** The runbook gives the rollout and rollback order across the three repos. The release notes call out the pin and the new client version.
+6. **Review.** Architecture and security review per repo. A confirmed finding in `api` becomes the fix ticket `api-review-1`, built through the same loop. Every changed repo is verified again.
+7. **Ship gate, then ship.** The merge order is `statement-client, api, web`. kinetic opens three draft PRs in that order, titled `INV-4321: <title>`. `api`'s PR lists the `statement-client` PR under Depends on, and has a warning that its snapshot pin must move to a released version before merge. After the last PR exists, the first two are updated so their Related PRs list all three.
+8. **Retro.** The runbook gives the rollout and rollback order across the three repos. The release notes call out the pin and the new client version.
 
-Starting from an existing spec instead: `/kinetic:run ~/specs/csv-export.md` starts at tickets (repo detection first), after the spec gate.
+Starting from an existing spec instead: `/kinetic:run ~/specs/csv-export.md` starts at discover, then the spec gate and tickets.
 
 ## Approval gates
 
@@ -224,7 +227,7 @@ Three gates, each asked with a multiple-choice question and recorded in state (`
 
 | Gate | When | What you see |
 |---|---|---|
-| `spec` | After the spec phase | The spec location and a three-line summary. The spec must already pass `spec_lint`. |
+| `spec` | After the specify phase | The spec location and a three-line summary. The spec must already pass `spec_lint`. |
 | `breakdown` | After tickets | Every ticket with its repo and blockers by edge type. Approving records the **grant**. |
 | `ship` | After review | Per repo: integration branch, base branch, merge order, latest verify result. |
 
@@ -234,7 +237,7 @@ The grant is what the build agents may do without asking again: commit and push 
 
 ### Branches and worktrees
 
-Each repo gets an **integration branch** `kinetic/<run-id>/integration`, checked out at `<run_dir>/worktrees/<repo>`. Each ticket gets its own branch `kinetic/<run-id>/<ticket-id>` and worktree `<run_dir>/worktrees/<repo>-<ticket-id>`, cut from the integration branch at dispatch time, so it already contains the work of the tickets it depends on.
+Each repo gets an **integration branch** `kinetic/<run-id>/integration`, checked out at `<run_dir>/worktrees/<repo>` by the discover phase. Until the breakdown gate is first approved, everything under `<run_dir>/worktrees/` is read-only (isolation hook). Once given, the grant stays: rejecting a re-asked breakdown gate later does not make the repos read-only again. Each ticket gets its own branch `kinetic/<run-id>/<ticket-id>` and worktree `<run_dir>/worktrees/<repo>-<ticket-id>`, cut from the integration branch at dispatch time, so it already contains the work of the tickets it depends on.
 
 ### Dependency edges
 
@@ -246,7 +249,7 @@ Tickets block each other with exactly three edge types (in Jira, a "blocks" link
 | `merge` | the upstream ticket is merged into its integration branch | a second ticket in the same repo builds on the first |
 | `release` | the upstream version is actually released (marked by hand) | a consumer that can only use a released artifact |
 
-`snapshot` edges need `publish_snapshot` and `pin` configured for the repos involved; without them the tickets phase uses `merge` edges instead.
+`snapshot` edges need `publish_snapshot` and `pin` configured for the repos involved; without them the decompose phase uses `merge` edges instead.
 
 ### Interfaces
 
@@ -383,6 +386,7 @@ Ship fills one template for every PR. The default is `templates/pr-body.md`. To 
 | `/kinetic:doctor` | Read-only health check with a one-line fix per failure |
 | `/kinetic:status [run-dir]` | Phase, tickets, frontier and gates of a run (the active one by default) |
 | `/kinetic:ask` | The lanes and the next step `next_step` computes for the active run |
+| `/kinetic:cleanup [run-dir]` | Removes the run's local worktrees and branches whose work is merged, after one confirmation |
 
 ## Skills and agents
 
@@ -391,9 +395,11 @@ Ship fills one template for every PR. The default is `templates/pr-body.md`. To 
 | `run` | command | sonnet | The orchestrator: lanes, gates, phases, build loop |
 | `implement` | command | sonnet | `run --from build` |
 | `init`, `doctor`, `status`, `ask` | commands | sonnet, haiku, haiku, haiku | Setup and read-only views |
+| `cleanup` | command | sonnet | Removes merged worktrees and branches of a run |
 | `grill` | phase skill | inline | Interview covering threat model and non-functional requirements; keeps the glossary and ADR drafts |
-| `spec` | phase skill | inline | Spec with testing decisions, linted by `spec_lint`, published to Jira or `<run_dir>/spec.md` |
-| `tickets` | phase skill | inline | Vertical slices, per-repo tickets, typed edges, validated by `graph validate` |
+| `discover` | phase skill | inline | Finds the run's repos from approved sources (base folders, your sources, the GitHub org), confirms them with you, registers them and cuts their worktrees |
+| `specify` | phase skill | inline | Spec with testing decisions, linted by `spec_lint`, published to Jira or `<run_dir>/spec.md` |
+| `decompose` | phase skill | inline | Vertical slices, per-repo tickets, typed edges, validated by `graph validate` |
 | `ship` | phase skill | inline | PR bodies, merge order, draft PR set |
 | `retro` | phase skill | inline | Retro, runbook, release notes |
 | `tdd` | skill | sonnet | Test-first loop the implementer preloads (`skills: [tdd]`) |
@@ -444,9 +450,13 @@ A repo-root `.kinetic.json` with the same keys overrides the central entry key b
 {
   "tracker": "jira",
   "tracker_settings": { "jira_project": "INV", "slice_issue_type": "Story", "child_issue_type": "Sub-task" },
-  "workspace_root": "~/workspace/kinetic-runs"
+  "workspace_root": "~/workspace/kinetic-runs",
+  "repo_roots": ["/Users/me/code"],
+  "github_orgs": ["acme"]
 }
 ```
+
+`repo_roots` (folders whose child repos discovery may scan) and `github_orgs` (orgs discovery may search) are written by the discover phase when you approve them, and offered as defaults on the next run. Missing keys mean none.
 
 The 0.2.0 top-level `jira_project`, `slice_issue_type` and `child_issue_type` keys are still read. With `"tracker": "local"` (or no `tracker` key) tickets are files under `<run_dir>/issues/`. See [Trackers](#trackers) for the other trackers, `tracker_settings` and `tracker_names`, and [The PR template override](#the-pr-template-override) for `pr_template`.
 
@@ -456,6 +466,7 @@ The 0.2.0 top-level `jira_project`, `slice_issue_type` and `child_issue_type` ke
 <workspace_root>/<run-id>/
   state.json            run state (flock-guarded, written atomically)
   spec.md               the spec (local mode, or a copy noting the Jira key)
+  discovery.md          repos chosen by discover, with reasons and sources
   docs/                 GLOSSARY.md, adr/, runbook.md, release-notes.md
   issues/<id>.md        ticket files (local mode, quick lane, fix tickets)
   reports/<id>.md       implementer reports (and <id>-fix-N.md)
@@ -546,7 +557,7 @@ The suite covers every script module and every hook, plus an end-to-end test tha
 
 ## Status and known limitations
 
-kinetic is at 0.3.1 (see `.claude-plugin/plugin.json`); 0.3.0 adds trackers, human tickets, relationship types, the local board and the PR template override, and 0.3.1 corrects the hook wording, flags unmerged agent tickets at ship, and keeps file modes on atomic writes. The scripts and hooks are tested; the skills and agents have not yet been exercised in a live end-to-end run. `docs/plan/kinetic-v0-rulings.md` records every decision made while building it and the v0.2 backlog.
+kinetic is at 0.4.0 (see `.claude-plugin/plugin.json`); 0.4.0 adds the discover phase (repos found from approved sources, worktrees cut at discover, repos read-only until the breakdown gate) and `/kinetic:init` from the current directory; 0.3.0 adds trackers, human tickets, relationship types, the local board and the PR template override, and 0.3.1 corrects the hook wording, flags unmerged agent tickets at ship, and keeps file modes on atomic writes. The scripts and hooks are tested; the skills and agents have not yet been exercised in a live end-to-end run. `docs/plan/kinetic-v0-rulings.md` records every decision made while building it and the v0.2 backlog.
 
 Not yet verified in a live session:
 

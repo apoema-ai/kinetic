@@ -84,12 +84,14 @@ def interface_issues(tickets: dict) -> dict:
     return {"errors": errors, "warnings": warnings}
 
 
-def validate(tickets: dict, lane: str, slices: list | None = None) -> list:
+def validate(tickets: dict, lane: str, slices: list | None = None, repos: dict | None = None) -> list:
     # lane is accepted per the interface; the brief gives it no behaviour.
     errors = []
     for i, t in sorted(tickets.items()):
         if state.field(t, "kind") != "human" and not t.get("repo"):
             errors.append(f"ticket {i}: missing repo")
+        elif repos is not None and state.field(t, "kind") != "human" and t["repo"] not in repos:
+            errors.append(f"ticket {i}: repo '{t['repo']}' is not in the run; run discover for it")
         for x in state.field(t, "after"):
             if x not in tickets:
                 errors.append(f"ticket {i}: unknown after '{x}'")
@@ -130,7 +132,7 @@ def main(argv=None) -> int:
     try:
         s = state.load(a.run)
         if a.cmd == "validate":
-            errors = validate(s["tickets"], s["lane"], s.get("slices"))
+            errors = validate(s["tickets"], s["lane"], s.get("slices"), s.get("repos", {}))
             print(json.dumps({"errors": errors,
                               "warnings": interface_issues(s["tickets"])["warnings"]
                               + soft_warnings(s["tickets"])}))
