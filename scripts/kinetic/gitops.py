@@ -26,7 +26,7 @@ def create_worktree(bare_or_repo, dest, branch: str, base: str) -> None:
         bare = _git(bare_or_repo, "rev-parse", "--is-bare-repository")
         if bare.returncode == 0 and bare.stdout.strip() == "true":
             base = f"origin/{base}"
-    args =["worktree", "add", str(dest), branch] if exists else \
+    args = ["worktree", "add", str(dest), branch] if exists else \
         ["worktree", "add", "-b", branch, str(dest), base]
     r = _git(bare_or_repo, *args)
     if r.returncode != 0:

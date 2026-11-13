@@ -93,6 +93,10 @@ def _run(argv) -> str:
     return r.stdout
 
 
+def _valid_name(name) -> bool:
+    return bool(name) and Path(name).name == name and name not in (".", "..")
+
+
 def clone(bare_dir, repo=None, url=None, name=None) -> dict:
     root = Path(bare_dir)
     if not root.is_dir():
@@ -103,6 +107,8 @@ def clone(bare_dir, repo=None, url=None, name=None) -> dict:
         name = repo.split("/")[1]
     elif not (url and name and not repo):
         raise ValueError("give either --repo ORG/NAME, or --url together with --name")
+    if not _valid_name(name):
+        raise ValueError(f"--name must be a single path component, got: {name}")
     dest = root / name
     if dest.exists():
         raise ValueError(f"already exists: {dest}")
@@ -135,10 +141,17 @@ def _origin_refs(clone_path) -> dict:
 
 
 def _refresh_one(bare_dir, name) -> dict:
+    if not _valid_name(name):
+        return {"name": name, "ok": False, "advanced": [],
+                "error": f"name is not a single path component: {name}"}
     path = Path(bare_dir) / name
     if not (path.is_dir() and is_bare(path)):
         return {"name": name, "ok": False, "advanced": [],
                 "error": f"no bare clone named {name} in {bare_dir}"}
+    if not _git(path, "config", "--get", "remote.origin.fetch"):
+        return {"name": name, "ok": False, "advanced": [],
+                "error": f"no fetch refspec; run git -C {path} config "
+                         "remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'"}
     try:
         before = _origin_refs(path)
         _run(["git", "-C", str(path), "fetch", "origin", "--prune"])

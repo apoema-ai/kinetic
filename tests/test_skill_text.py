@@ -156,7 +156,8 @@ class SkillTextTest(unittest.TestCase):
         text = (ROOT / "skills" / "discover" / "SKILL.md").read_text()
         for needle in ("kinetic bare show", "kinetic bare list", "kinetic bare refresh",
                        "kinetic bare clone --repo", "not refreshed:", "default_branch",
-                       "never run it without `--name`", "counts as one match"):
+                       "never run it without `--name`", "counts as one match",
+                       "recheck with `kinetic bare list`"):
             self.assertIn(needle, text)
         self.assertNotIn("only the GitHub calls in step 4 reach the network", text)
 

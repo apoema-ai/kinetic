@@ -203,6 +203,32 @@ class BareTests(unittest.TestCase):
         self.assertTrue(out[1]["error"])
         self.assertIn("no bare clone named nope", out[2]["error"])
 
+    def test_refresh_refuses_clone_without_fetch_refspec(self):
+        make_remote(self.tmp / "remote")
+        make_bare(self.tmp / "remote", self.tmp / "b" / "api")  # plain clone --bare: no refspec
+        dest = self.tmp / "b" / "api"
+        old = git(dest, "rev-parse", "main")
+        commit_file(self.tmp / "remote", "b.txt", "b\n", "second")
+        [r] = bare.refresh(str(self.tmp / "b"), ["api"])
+        self.assertEqual((r["ok"], r["advanced"]), (False, []))
+        self.assertEqual(r["error"], f"no fetch refspec; run git -C {dest} config "
+                         "remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'")
+        self.assertEqual(git(dest, "rev-parse", "main"), old)
+
+    def test_clone_rejects_name_that_is_not_one_path_component(self):
+        make_remote(self.tmp / "remote")
+        (self.tmp / "b").mkdir()
+        for bad in ("../evil", "a/b", "..", "."):
+            with self.assertRaises(ValueError):
+                bare.clone(str(self.tmp / "b"), url=str(self.tmp / "remote"), name=bad)
+        self.assertEqual(sorted(p.name for p in (self.tmp / "b").iterdir()), [])
+
+    def test_refresh_rejects_name_that_is_not_one_path_component(self):
+        self._two_clones()
+        [r] = bare.refresh(str(self.tmp / "b"), ["../b/api"])
+        self.assertEqual((r["ok"], r["advanced"]), (False, []))
+        self.assertIn("not a single path component", r["error"])
+
     def test_cli_refresh_exits_1_on_any_failure(self):
         self._two_clones()
         with mock.patch.object(bare, "SETTINGS", self.settings):
