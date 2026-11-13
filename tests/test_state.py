@@ -486,3 +486,17 @@ class LaneAndRepoTest(unittest.TestCase):
         s = state.load(self.run_dir)
         self.assertEqual((s["lane"], s["repos"]), ("epic", {}))
         self.assertEqual(state.main(["set-lane", "--run", str(self.run_dir), "--lane", "quick"]), 1)
+
+
+class GrantTest(unittest.TestCase):
+    def test_breakdown_grant_survives_a_later_rejection(self):
+        with tempfile.TemporaryDirectory() as d:
+            run = Path(d) / "run"
+            state.init(run, "epic", "X-1")
+            state.record_gate(run, "breakdown", False)
+            self.assertNotIn("granted_at", state.load(run)["gates"]["breakdown"])
+            state.record_gate(run, "breakdown", True)
+            first = state.load(run)["gates"]["breakdown"]["granted_at"]
+            state.record_gate(run, "breakdown", False, "revise")
+            g = state.load(run)["gates"]["breakdown"]
+            self.assertEqual((g["approved"], g["granted_at"]), (False, first))

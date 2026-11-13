@@ -27,10 +27,19 @@ def _real(p: str) -> str:
     return os.path.realpath(os.path.expanduser(p))
 
 
+def _lists(data: dict, path) -> dict:
+    out = {}
+    for key in ("repo_roots", "github_orgs"):
+        v = data.get(key) or []
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise config.ConfigError(f"'{key}' in {path} must be a list of strings")
+        out[key] = list(v)
+    return out
+
+
 def settings(path=None) -> dict:
-    data = config._load(Path(path or SETTINGS))
-    return {"repo_roots": list(data.get("repo_roots") or []),
-            "github_orgs": list(data.get("github_orgs") or [])}
+    path = Path(path or SETTINGS)
+    return _lists(config._load(path), path)
 
 
 def _merge(old: list, new: list) -> list:
@@ -44,12 +53,13 @@ def _merge(old: list, new: list) -> list:
 def remember(roots: list, orgs: list, path=None) -> dict:
     path = Path(path or SETTINGS)
     data = config._load(path)  # raises on bad JSON before anything is written
+    old = _lists(data, path)
     real = [_real(r) for r in roots]
     bad = [r for r, rr in zip(roots, real) if not os.path.isdir(rr)]
     if bad:
         raise ValueError(f"not a directory: {', '.join(bad)}")
-    data["repo_roots"] = _merge([_real(r) for r in data.get("repo_roots") or []], real)
-    data["github_orgs"] = _merge(list(data.get("github_orgs") or []), [o.strip() for o in orgs if o.strip()])
+    data["repo_roots"] = _merge([_real(r) for r in old["repo_roots"]], real)
+    data["github_orgs"] = _merge(old["github_orgs"], [o.strip() for o in orgs if o.strip()])
     _write(path, data)
     return {"repo_roots": data["repo_roots"], "github_orgs": data["github_orgs"]}
 
@@ -69,7 +79,10 @@ def _item(path: str, registered: dict) -> dict:
             "registered": name is not None, "registered_as": name}
 
 
-def scan(roots: list, central=None) -> list:
+def scan(roots: list, central=None, enclosing: bool = False) -> list:
+    """List git repos: a root that is a repo's top level is that repo; otherwise its
+    direct child repos. enclosing=True (init on the current directory) also returns
+    the top level of a repo the root sits inside."""
     entries = config._load(Path(central or REPOS))
     registered = {_real(e["path"]): n for n, e in entries.items()
                   if isinstance(e, dict) and e.get("path")}
@@ -85,7 +98,7 @@ def scan(roots: list, central=None) -> list:
         if not os.path.isdir(root):
             continue
         top = _git(root, "rev-parse", "--show-toplevel")
-        if top:
+        if top and (enclosing or _real(top) == root):
             add(_real(top))
             continue
         try:
@@ -127,10 +140,11 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("settings")
     sp = sub.add_parser("remember")
-    sp.add_argument("--root", action="append", default=[])
-    sp.add_argument("--org", action="append", default=[])
+    sp.add_argument("--root", action="extend", nargs="+", default=[])
+    sp.add_argument("--org", action="extend", nargs="+", default=[])
     sp = sub.add_parser("scan")
-    sp.add_argument("--root", action="append", required=True)
+    sp.add_argument("--root", action="extend", nargs="+", required=True)
+    sp.add_argument("--enclosing", action="store_true")
     sp = sub.add_parser("register")
     for a in ("--name", "--path", "--verify"):
         sp.add_argument(a, required=True)
@@ -143,7 +157,7 @@ def main(argv=None) -> int:
         elif a.cmd == "remember":
             out = remember(a.root, a.org, SETTINGS)
         elif a.cmd == "scan":
-            out = scan(a.root, REPOS)
+            out = scan(a.root, REPOS, a.enclosing)
         else:
             out = register(a.name, a.path, a.verify, a.publish_snapshot, a.pin, REPOS)
     except (ValueError, OSError, config.ConfigError) as e:

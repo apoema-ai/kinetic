@@ -221,7 +221,7 @@ The grant is what the build agents may do without asking again: commit and push 
 
 ### Branches and worktrees
 
-Each repo gets an **integration branch** `kinetic/<run-id>/integration`, checked out at `<run_dir>/worktrees/<repo>` by the discover phase. Until the breakdown gate is approved these worktrees are read-only: the isolation hook allows writes only in the run directory. Each ticket gets its own branch `kinetic/<run-id>/<ticket-id>` and worktree `<run_dir>/worktrees/<repo>-<ticket-id>`, cut from the integration branch at dispatch time, so it already contains the work of the tickets it depends on.
+Each repo gets an **integration branch** `kinetic/<run-id>/integration`, checked out at `<run_dir>/worktrees/<repo>` by the discover phase. Until the breakdown gate is first approved, everything under `<run_dir>/worktrees/` is read-only (isolation hook). Once given, the grant stays: rejecting a re-asked breakdown gate later does not make the repos read-only again. Each ticket gets its own branch `kinetic/<run-id>/<ticket-id>` and worktree `<run_dir>/worktrees/<repo>-<ticket-id>`, cut from the integration branch at dispatch time, so it already contains the work of the tickets it depends on.
 
 ### Dependency edges
 

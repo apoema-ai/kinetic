@@ -348,8 +348,12 @@ def record_gate(run_dir, gate: str, approved: bool, note: str = "") -> None:
             reason = ship_refusal(s, run_dir)
             if reason:
                 raise ValueError(reason)
-        s["gates"].__setitem__(
-            gate, {"approved": approved, "note": note, "at": _now()})
+        rec = {"approved": approved, "note": note, "at": _now()}
+        # the breakdown grant, once given, survives a later rejection of a re-asked gate
+        granted = (s["gates"].get(gate) or {}).get("granted_at")
+        if gate == "breakdown" and (granted or approved):
+            rec["granted_at"] = granted or rec["at"]
+        s["gates"][gate] = rec
 
     _mutate(run_dir, fn)
 

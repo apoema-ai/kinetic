@@ -17,7 +17,7 @@ Run this outside the session that owns the active run: in that session the isola
 
 ## Steps
 
-1. **Repos.** Use the paths in the arguments. With none, use the current directory: run `kinetic discover scan --root "$PWD"`.
+1. **Repos.** Use the paths in the arguments. With none, use the current directory: run `kinetic discover scan --enclosing --root "$PWD"`.
    - The current directory is inside a git repo: the scan returns that one repo (its top level); register it.
    - It is a folder holding git repos: ask which to register, all pre-selected. Also ask whether to save the folder as a repo root for discovery; on yes, `kinetic discover remember --root "$PWD"`.
    - The scan returns nothing: ask which repo paths to register.

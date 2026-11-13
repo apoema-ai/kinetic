@@ -4,7 +4,7 @@ You stay thin: never read code or full diffs. Read only script JSON, the first l
 
 ## Setup (once, before round 1)
 
-1. Validate: `kinetic graph validate --run <run_dir>`. Stop on any `errors` and send the user back to the tickets phase. This must come first: `frontier` returns an empty list on a cycle, which would look like "nothing to do".
+1. Validate: `kinetic graph validate --run <run_dir>`. An error that a ticket's repo "is not in the run" is handled in step 3, not here. Stop on any other `errors` and send the user back to the tickets phase. This must come first: `frontier` returns an empty list on a cycle, which would look like "nothing to do".
 2. The breakdown gate must be recorded approved (`gates.md`).
 3. Repos and integration worktrees already exist: the discover phase registered every repo in `state.repos` with its worktree `<run_dir>/worktrees/<repo>` on `kinetic/<run-id>/integration`. Check them:
    - Every agent ticket's repo must be in `state.repos` (`graph validate` in step 1 reports it). A run started before the discover phase existed has empty `state.repos`: run `skills/discover/SKILL.md` with `Mode: confirm-only` on its tickets' repos first. Any other missing repo means a ticket was added after the breakdown gate: stop, `set-phase tickets`, and ask the breakdown gate again, so the grant names every repo.

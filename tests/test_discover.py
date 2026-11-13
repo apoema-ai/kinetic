@@ -81,8 +81,9 @@ class DiscoverTest(unittest.TestCase):
 
     def test_scan_root_inside_a_repo_returns_its_top_level(self):
         (self.root / "api" / "src").mkdir()
-        out = discover.scan([str(self.root / "api" / "src")], central=self.repos_json)
+        out = discover.scan([str(self.root / "api" / "src")], central=self.repos_json, enclosing=True)
         self.assertEqual([(r["name"], r["path"]) for r in out], [("api", str(self.root / "api"))])
+        self.assertEqual(discover.scan([str(self.root / "api" / "src")], central=self.repos_json), [])
 
     def test_scan_reports_remote(self):
         out = {r["name"]: r for r in discover.scan([str(self.root)], central=self.repos_json)}
@@ -102,6 +103,33 @@ class DiscoverTest(unittest.TestCase):
         self.addCleanup(locked.chmod, 0o755)
         out = discover.scan([str(self.tmp / "missing"), str(self.root)], central=self.repos_json)
         self.assertEqual(sorted(r["name"] for r in out), ["api", "web"])
+
+    def test_scan_root_inside_an_enclosing_repo_lists_children(self):
+        # a dotfiles repo at the parent must not hide the checkouts under the root
+        _git_init(self.tmp)
+        names = sorted(r["name"] for r in discover.scan([str(self.root)], central=self.repos_json))
+        self.assertEqual(names, ["api", "web"])
+
+    def test_scan_enclosing_returns_top_level_from_a_subdir(self):
+        (self.root / "api" / "src").mkdir()
+        out = discover.scan([str(self.root / "api" / "src")], central=self.repos_json, enclosing=True)
+        self.assertEqual([r["name"] for r in out], ["api"])
+
+    def test_non_list_settings_values_are_rejected(self):
+        s = self.tmp / "settings.json"
+        for bad in ('"~/code"', "3"):
+            s.write_text('{"repo_roots": %s}' % bad)
+            with self.assertRaises(config.ConfigError):
+                discover.settings(path=s)
+            with self.assertRaises(config.ConfigError):
+                discover.remember([str(self.root)], [], path=s)
+            self.assertEqual(s.read_text(), '{"repo_roots": %s}' % bad)
+
+    def test_cli_accepts_several_values_after_one_flag(self):
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            code = discover.main(["scan", "--root", str(self.root), str(self.tmp / "missing")])
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(r["name"] for r in json.loads(buf.getvalue())), ["api", "web"])
 
     # register
 
