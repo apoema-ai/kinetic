@@ -27,8 +27,12 @@ _Avoid_: Model name (sonnet, opus) in agent definitions, size, class
 ## Trackers
 
 **Tracker adapter**:
-The per-tracker instructions (GitHub, Jira, Linear, local, other) that tell kinetic how to read and write tickets in one issue tracker.
+The per-tracker instructions (GitHub, Jira, Linear, local, Orbit, other) that tell kinetic how to read and write tickets in one issue tracker.
 _Avoid_: Adapter (unqualified), integration
+
+**Ticket store**:
+Where a run's tickets live, behind one interface that `state.py` reads and writes through: the local ticket store (`state.json`) for most trackers, or the Orbit ticket store (Tasks on an Orbit Board) for the `orbit` tracker.
+_Avoid_: Adapter, backend, board
 
 ## Repos
 

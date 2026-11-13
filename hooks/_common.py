@@ -251,7 +251,7 @@ def _in_scope(inp: dict, run_dir: str, st: dict) -> bool:
     return cwd == root or cwd.startswith(root + os.sep)
 
 
-def active_run(inp=None):
+def active_run(inp=None, tickets: bool = True):
     """Return (run_dir, state) for the active run if this hook call is in its scope, else None.
 
     In scope: the session that owns the run, any call whose cwd is inside the run dir, or every
@@ -263,8 +263,50 @@ def active_run(inp=None):
         return None
     if state is None:
         raise ImportError("kinetic package not importable")
-    st = state.load(run_dir)
+    st = state.load(run_dir, tickets=tickets)
     return (run_dir, st) if _in_scope(inp or {}, run_dir, st) else None
+
+
+TOUCH_INTERVAL = 300  # seconds between liveness signals per worktree
+
+
+def touch_ticket(inp) -> None:
+    """Tell the run's ticket store that the ticket whose worktree holds this
+    tool call's cwd is alive, at most once per TOUCH_INTERVAL per worktree.
+    The stamp is checked before any ticket read, so most calls cost one stat.
+    Never raises: a failed touch is one stderr line."""
+    try:
+        import hashlib
+        import time
+        from kinetic import ticket_store
+        found = active_run(inp, tickets=False)
+        if not found:
+            return
+        run_dir = found[0]
+        cwd = os.path.realpath(inp.get("cwd") or os.getcwd())
+        # Key the throttle by the enclosing git checkout (a ticket worktree), so
+        # calls from its subfolders share one stamp.
+        root = Path(cwd)
+        while root.parent != root and not (root / ".git").exists():
+            root = root.parent
+        key = str(root) if (root / ".git").exists() else cwd
+        stamps = Path(run_dir) / "touch"
+        stamp = stamps / hashlib.sha1(key.encode()).hexdigest()[:16]
+        if stamp.exists() and time.time() - stamp.stat().st_mtime < TOUCH_INTERVAL:
+            return
+        stamps.mkdir(exist_ok=True)
+        stamp.touch()
+        st = state.load(run_dir)
+        for tid, t in st["tickets"].items():
+            wt = t.get("worktree")
+            if not wt or t.get("status") != "running":
+                continue
+            root = os.path.realpath(wt)
+            if cwd == root or cwd.startswith(root + os.sep):
+                ticket_store.for_state(st).touch(run_dir, st, tid)
+                return
+    except Exception as e:  # liveness is best effort; never break the tool call
+        print(f"kinetic hook: touch failed: {e}", file=sys.stderr)
 
 
 def abs_path(path: str, cwd) -> str:

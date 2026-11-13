@@ -35,7 +35,7 @@ Guides (read each at the point named, under `<clone>/skills/run/guides/`):
 Read `guides/lanes.md`, pick the lane and entry phase, then:
 
 ```
-kinetic state init --run <run_dir> --lane <lane> --ref "<ref>"
+kinetic state init --run <run_dir> --lane <lane> --ref "<ref>" --ticket-store "$(kinetic tracker store-record)"
 ```
 
 Write the pointer: `printf '%s' <run_dir> | tee ~/.config/kinetic/active-run` (the directory `~/.config/kinetic/` already exists after init).

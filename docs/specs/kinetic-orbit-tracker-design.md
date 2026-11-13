@@ -83,7 +83,7 @@ Two general features. Both get an ADR and glossary entries in the Orbit reposito
 - `orbit batch --file <path>` (or `-` for stdin), with `--dry-run` to validate without writing, like `orbit migrate`. The command is called `batch` rather than `apply`, because `--apply` already means "run the previewed change" in `migrate`, `triage` and `remote`.
 - **Operations:** `add`, `update`, `label`, `depend`, `undepend`, `claim`, `heartbeat`, `release`, `done`, `cancel`, `reopen`, `comment`, `annotate`. Each takes the same fields and follows the same rules as its command.
 - **Source Key** (new glossary term): an optional caller-chosen string on `add` that names the Task in the system that asked for it. Later operations in the same Batch can refer to the Task by Source Key instead of Task ID. Orbit stores the Source Key on the Task and returns it in `show`, `list` and `export`. An `add` whose Source Key already exists on the Board matches that Task instead of creating another, so a retried Batch creates no duplicates. A Source Key is unique per Board.
-- **Output:** one JSON object with the Source Key to Task ID map and the result of each operation. On failure nothing is written, and the error names the failing operation's index and code.
+- **Output:** one JSON object with the Source Key to Task ID map, the result of each operation, and whether a commit was made (`committed`; Orbit's commit API returns no hash). On failure nothing is written, and the error names the failing operation's index and code.
 
 Uses: importing a plan document as Tasks, a planning skill filing a Parent Task with its SubTasks and Dependencies, migrating from another tracker, and reserving Tasks for one orchestrating Agent (remove a Hold Label and Claim in one step, so no other Agent can claim in between).
 
@@ -92,7 +92,7 @@ Uses: importing a plan document as Tasks, a planning skill filing a Parent Task 
 **Annotation** (new glossary term): structured data that one tool attaches to a Task under the tool's name. Orbit stores, returns and shows it, but never interprets it: an Annotation never affects Ready, Blocked, Claim eligibility or Status. _Avoid_: metadata, custom field, namespace, extra.
 
 - Stored in the Task frontmatter as `annotations: {<owner>: <JSON object>}`. The **owner** is a lowercase slug naming the tool, for example `ci` or `planner`.
-- `orbit annotation set <id> <owner> --json <object>` replaces that owner's Annotation. `orbit annotation remove <id> <owner>` deletes it. Both are also Batch operations (`annotate`).
+- `orbit annotation set <id> <owner> --value <object>` replaces that owner's Annotation (`--json` is Orbit's global output flag, so the value has its own option). `orbit annotation remove <id> <owner>` deletes it. Both are also Batch operations (`annotate`).
 - Returned in `show --json`, `list --json` and `export`. Today unknown frontmatter fields survive a round trip, but no JSON output returns them.
 - Shown in human `orbit show` output, one line per owner, so no data is hidden.
 - Capped in size per owner (Orbit's call; 8 KiB is a reasonable default). `orbit doctor` reports Annotations that are not JSON objects.
@@ -137,13 +137,13 @@ The ticket store is chosen in one place, from the tracker: `orbit` selects the O
 
 ### Liveness hook
 
-Kinetic's existing PostToolUse hooks (`record_edit.py` after edits, `claim_run.py` after shell commands) also call the run's ticket store `touch`, at most once every 5 minutes per ticket (a stamp file in the run directory). Reusing them means no harness installer changes. The hook finds the ticket whose worktree contains the tool call's working directory. It never blocks the tool call, and a failed touch is logged, not raised. The hook does not know which ticket store is in use.
+Kinetic's existing PostToolUse hooks (`record_edit.py` after edits, `claim_run.py` after shell commands) also call the run's ticket store `touch`, at most once every 5 minutes per worktree (a stamp file in the run directory, keyed by the enclosing git checkout and checked before any ticket read, so most tool calls cost one file check). Reusing them means no harness installer changes. The hook finds the ticket whose worktree contains the tool call's working directory. It never blocks the tool call, and a failed touch is logged, not raised. The hook does not know which ticket store is in use.
 
 The Orbit ticket store implements `touch` as an Orbit heartbeat by the run's Claim holder, and reports `stuck` when that Claim is Stale. `kinetic status` shows a `stuck` running ticket as "implementer may be stuck". Kinetic does not act on it automatically.
 
 ### Doctor
 
-Doctor adds the chosen ticket store's health checks to its table, and stays unaware of Orbit itself. The Orbit ticket store's checks: the `orbit` binary exists, is at least the version that ships Batches and Annotations, and `export` returns the pinned `schema_version`; an Orbit Board is found; and the Board lists `names.hold` in `non_ready_labels`. Each failing check prints a one-line fix. Other trackers use the local ticket store, which adds no checks.
+Doctor adds the chosen ticket store's health checks to its table, and stays unaware of Orbit itself. The Orbit ticket store's checks: the `orbit` binary exists and has Batches (`orbit batch --help` succeeds), and `export` returns the pinned `schema_version` (3); an Orbit Board is found; and the Board lists `names.hold` in `non_ready_labels`. Each failing check prints a one-line fix. Other trackers use the local ticket store, which adds no checks.
 
 ### Tests
 
@@ -203,13 +203,13 @@ Today decompose calls `kinetic state set-ticket` once per ticket, then `kinetic 
 
 1. Decompose stages tickets with the same `set-ticket` command, with provisional ids (`NN-<repo>-<slug>`, as in local mode). The Orbit ticket store keeps staged tickets in `<run_dir>/tickets.staged.json`. The local ticket store writes `state.json` as today.
 2. `graph validate` and `graph topo` read through the interface, so they see staged tickets. They are unchanged.
-3. Recording the approved breakdown gate publishes, and `kinetic state publish-tickets --run <dir>` publishes on demand. The Orbit ticket store sends every staged ticket in one Batch with Source Keys, rewrites every reference (`blocked_by`, `after`, `related`, `slice`) to the Task IDs from the returned map, and deletes the staged file and the published ticket files under `<run_dir>/issues/`. Each ticket's body comes from its file. The local ticket store does nothing.
+3. Recording the approved breakdown gate publishes, and `kinetic state publish-tickets --run <dir>` publishes on demand. The Orbit ticket store sends every staged ticket in one Batch with Source Keys, records the Task IDs from the returned map (the slices in `state.json`; ticket references are rewritten on every read from each Task's Source Key, so the Annotation may still hold provisional ids), and deletes the staged file and the published ticket files under `<run_dir>/issues/`. Each ticket's body comes from its file. The local ticket store does nothing.
 4. Tickets added later (a new slice, a split ticket) go through the same stage and publish. Source Keys make a repeated publish safe after a crash.
 
 ## Constraints
 
 - Orbit commits on every write when `auto_commit = true`. Batches keep that to one commit per kinetic write. Heartbeats change only the Lease, so they create no commits.
-- Kinetic pins Orbit's export `schema_version` and a minimum Orbit version, and checks both in doctor.
+- Kinetic pins Orbit's export `schema_version` and checks for the `batch` command in doctor, rather than a version number.
 - The Board's `lease_minutes` (30 by default) must stay well above the 5-minute touch interval.
 - Kinetic never edits Orbit Task files directly. Every change goes through the `orbit` CLI.
 - Checked on Orbit 0.10.10 with a throwaway Board: `kinetic-<run id>` is accepted as a Claim holder, `waiting_on` can be set on an `in_progress` Task while its Claim stays, a heartbeat reports `committed: false`, and `orbit done` works on an unclaimed Task.

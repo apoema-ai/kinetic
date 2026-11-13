@@ -11,7 +11,7 @@ from kinetic.config import ConfigError, _load
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SETTINGS = Path.home() / ".config/kinetic/settings.json"
 
-TRACKERS = ("jira", "github", "linear", "local", "other")
+TRACKERS = ("jira", "github", "linear", "local", "orbit", "other")
 ROLES = (
     "kind.agent", "kind.human",
     "edge.snapshot", "edge.merge", "edge.release",
@@ -23,6 +23,7 @@ REQUIRED = {
     "github": ["github_repo"],
     "linear": ["linear_team"],
     "local": [],
+    "orbit": [],
     "other": [],
 }
 _LEGACY = ("jira_project", "slice_issue_type", "child_issue_type")
@@ -132,12 +133,16 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="kinetic.tracker")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("resolve")
+    sub.add_parser("store-record")
     p = sub.add_parser("pr-template")
     p.add_argument("--repo")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "resolve":
             out = resolve()
+        elif a.cmd == "store-record":
+            from kinetic import ticket_store
+            out = ticket_store.for_tracker(resolve(settings=DEFAULT_SETTINGS)["tracker"])
         else:
             out = {"path": pr_template(Path(a.repo) if a.repo else None)}
     except TrackerError as e:

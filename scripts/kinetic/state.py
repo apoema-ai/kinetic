@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import fcntl
 import json
 import os
@@ -10,6 +11,8 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from kinetic import ticket_store
 
 LANES = ("quick", "feature", "epic")
 STATUSES = ("todo", "running", "done", "done_with_concerns", "needs_decision",
@@ -32,10 +35,14 @@ def _file(run_dir) -> Path:
 OLD_PHASES = {"spec": "specify", "tickets": "decompose"}
 
 
-def load(run_dir) -> dict:
+def load(run_dir, tickets: bool = True) -> dict:
+    """The run's state. tickets=False skips reading a non-local ticket store
+    (tickets is then {}), for callers that need only run-level fields."""
     st = json.loads(_file(run_dir).read_text())
     if st.get("phase") in OLD_PHASES:
         st["phase"] = OLD_PHASES[st["phase"]]
+    if not ticket_store.is_local(st) and tickets:
+        st["tickets"] = ticket_store.for_state(st).read(run_dir, st)
     return st
 
 
@@ -62,21 +69,47 @@ def atomic_write(path, text: str) -> None:
 
 
 def save(run_dir, state: dict) -> None:
+    if not ticket_store.is_local(state):
+        # the run's ticket store holds the tickets; aliases are rebuilt on every read
+        state = {k: v for k, v in state.items() if k != "ticket_aliases"}
+        state["tickets"] = {}
     atomic_write(_file(run_dir), json.dumps(state, indent=2, sort_keys=True))
 
 
-def _mutate(run_dir, fn) -> dict:
-    """Exclusive-locked load -> fn(state) -> save; returns the saved state."""
+def _mutate(run_dir, fn, tickets: bool = True) -> dict:
+    """Exclusive-locked load -> fn(state) -> save; returns the saved state.
+    tickets=False changes run-level fields only, without reading the ticket store."""
     Path(run_dir).mkdir(parents=True, exist_ok=True)
     with open(Path(run_dir) / "state.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        state = load(run_dir)
+        state = load(run_dir, tickets=tickets)
+        before = copy.deepcopy(state.get("tickets", {}))
         fn(state)
+        if tickets:
+            ticket_store.for_state(state).write(run_dir, state, before, state.get("tickets", {}))
         save(run_dir, state)
         return state
 
 
-def init(run_dir, lane: str, ref: str, force: bool = False) -> dict:
+def _alias(state: dict, ticket_id):
+    """A ticket's current id: a provisional id resolves after its ticket is published."""
+    return (state.get("ticket_aliases") or {}).get(ticket_id, ticket_id)
+
+
+def _aliased_fields(state: dict, fields: dict) -> dict:
+    out = dict(fields)
+    if "blocked_by" in out:
+        out["blocked_by"] = [dict(e, id=_alias(state, e["id"])) for e in out["blocked_by"]]
+    for key in ("after", "related"):
+        if key in out and out[key]:
+            out[key] = [_alias(state, x) for x in out[key]]
+    if out.get("slice"):
+        out["slice"] = _alias(state, out["slice"])
+    return out
+
+
+def init(run_dir, lane: str, ref: str, force: bool = False,
+         ticket_store_record: dict | None = None) -> dict:
     if lane not in LANES:
         raise ValueError(f"invalid lane '{lane}': expected one of {LANES}")
     Path(run_dir).mkdir(parents=True, exist_ok=True)
@@ -84,6 +117,7 @@ def init(run_dir, lane: str, ref: str, force: bool = False) -> dict:
         "run_id": uuid.uuid4().hex[:12], "run_dir": str(run_dir), "lane": lane,
         "ref": ref, "phase": "intake", "tickets": {}, "slices": [], "repos": {},
         "gates": {}, "rulings": [], "verify": {}, "last_edit_at": None,
+        "ticket_store": ticket_store_record or dict(ticket_store.LOCAL),
     }
     with open(Path(run_dir) / "state.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -203,6 +237,10 @@ def done_refusal(state: dict, ticket_id: str):
         return f"ticket {ticket_id}: no verify record; run kinetic.verify with --ticket {ticket_id}"
     if v.get("exit_code") != 0:
         return f"ticket {ticket_id}: last verify failed (exit {v.get('exit_code')}), log {v.get('log_path')}"
+    unattributed = state.get("unattributed_edit_at")
+    if unattributed and unattributed > (v.get("at") or ""):
+        return (f"ticket {ticket_id}: an edit at {unattributed} could not be attributed to a ticket "
+                "(the ticket store was unreachable); re-run kinetic.verify")
     repo = state.get("repos", {}).get(state["tickets"].get(ticket_id, {}).get("repo") or "", {})
     if repo.get("last_edit_ticket") == ticket_id and (repo.get("last_edit_at") or "") > (v.get("at") or ""):
         return f"ticket {ticket_id}: worktree edited after its last verify; re-run kinetic.verify"
@@ -244,24 +282,25 @@ def set_ticket(run_dir, ticket_id: str, require_verify: bool = False, **fields) 
     _check_fields(fields)
 
     def fn(state):
-        existing = state["tickets"].get(ticket_id, {})
+        tid = _alias(state, ticket_id)
+        existing = state["tickets"].get(tid, {})
         if fields.get("status") in DONE_STATUSES:
             if fields.get("kind", field(existing, "kind")) == "human":
                 raise ValueError(f"ticket {ticket_id} is a human ticket: mark it done with "
                                  "`kinetic.state human-done`")
             if require_verify:
-                reason = done_refusal(state, ticket_id)
+                reason = done_refusal(state, tid)
                 if reason:
                     raise ValueError(reason)
-        t = state["tickets"].setdefault(ticket_id, ticket_defaults())
-        t.update(fields)
+        t = state["tickets"].setdefault(tid, ticket_defaults())
+        t.update(_aliased_fields(state, fields))
 
     return _mutate(run_dir, fn)
 
 
 def human_done(run_dir, ticket_id: str, note: str | None = None) -> dict:
     def fn(state):
-        t = state["tickets"].get(ticket_id)
+        t = state["tickets"].get(_alias(state, ticket_id))
         if t is None:
             raise ValueError(f"ticket {ticket_id} not found")
         if field(t, "kind") != "human":
@@ -324,6 +363,17 @@ def record_verify(run_dir, ticket_id, exit_code: int, log_path: str, repo_name=N
 
 
 def record_edit(run_dir, path: str) -> None:
+    try:
+        _record_edit(run_dir, path)
+    except ticket_store.TicketStoreError:
+        # Tickets unreadable, so the edit cannot be attributed: stamp it run-wide,
+        # which makes the stop gate and every done refusal ask for a fresh verify.
+        now = _now()
+        _mutate(run_dir, lambda s: s.update(unattributed_edit_at=now, last_edit_at=now),
+                tickets=False)
+
+
+def _record_edit(run_dir, path: str) -> None:
     real = os.path.realpath(path)
 
     def fn(state):
@@ -364,6 +414,21 @@ def record_gate(run_dir, gate: str, approved: bool, note: str = "") -> None:
         s["gates"][gate] = rec
 
     _mutate(run_dir, fn)
+    if gate == "breakdown" and approved:
+        publish_tickets(run_dir)
+
+
+def publish_tickets(run_dir) -> dict:
+    """Publish staged tickets through the run's ticket store; returns provisional -> final id.
+    A no-op for the local ticket store."""
+    with open(Path(run_dir) / "state.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = load(run_dir)
+        mapping = ticket_store.for_state(state).publish(run_dir, state)
+        if mapping and not ticket_store.is_local(state):
+            state["slices"] = [mapping.get(s, s) for s in state.get("slices", [])]
+            save(run_dir, state)
+        return mapping
 
 
 def add_ruling(run_dir, what: str, why: str, cost: str) -> None:
@@ -409,7 +474,7 @@ def main(argv=None) -> int:
             sp.add_argument(a, **kw)
 
     cmd("init", ("--lane", {"required": True}), ("--ref", {"required": True}),
-        ("--force", {"action": "store_true"}))
+        ("--force", {"action": "store_true"}), ("--ticket-store", {"metavar": "JSON"}))
     cmd("set-phase", ("--phase", {"required": True}))
     cmd("load")
     cmd("set-slices", ("--slices", {"required": True, "metavar": "JSON_LIST"}))
@@ -426,6 +491,7 @@ def main(argv=None) -> int:
     cmd("record-edit", ("--path", {"required": True}))
     cmd("record-gate", ("--gate", {"required": True}), ("--approved", {"type": _bool, "required": True}),
         ("--note", {"default": ""}))
+    cmd("publish-tickets")
     cmd("add-ruling", ("--what", {"required": True}), ("--why", {"required": True}),
         ("--cost", {"required": True}))
     cmd("stale-running")
@@ -433,7 +499,8 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "init":
-            out = init(Path(a.run), a.lane, a.ref, a.force)
+            record = json.loads(a.ticket_store) if a.ticket_store else None
+            out = init(Path(a.run), a.lane, a.ref, a.force, ticket_store_record=record)
         elif a.cmd == "set-phase":
             out = set_phase(a.run, a.phase)
         elif a.cmd == "load":
@@ -457,6 +524,8 @@ def main(argv=None) -> int:
         elif a.cmd == "record-edit":
             record_edit(a.run, a.path)
             out = {"last_edit_at": load(a.run)["last_edit_at"]}
+        elif a.cmd == "publish-tickets":
+            out = publish_tickets(a.run)
         elif a.cmd == "record-gate":
             record_gate(a.run, a.gate, a.approved, a.note)
             out = load(a.run)["gates"]

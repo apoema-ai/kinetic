@@ -722,3 +722,59 @@ class DoctorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrbitHealthTest(unittest.TestCase):
+    """Doctor's tracker rows include the chosen ticket store's health rows."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        self.board = self.tmp / "repo"
+        (self.board / ".orbit" / "board").mkdir(parents=True)
+        self.config = self.board / ".orbit" / "board" / "config.toml"
+        self.config.write_text('[board]\nnon_ready_labels = [\n    "needs-triage",\n    "kinetic",\n]\n')
+        self.settings = self.tmp / "settings.json"
+        self.settings.write_text(json.dumps({"tracker": "orbit",
+                                             "tracker_settings": {"orbit_dir": str(self.board)}}))
+        patcher = mock.patch.dict(os.environ, {"PATH": str(self.bin)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def orbit(self, schema=3, batch=0):
+        p = self.bin / "orbit"
+        p.write_text("#!/bin/sh\n"
+                     f'case "$*" in *"batch --help"*) exit {batch};; '
+                     f'*export*) echo \'{{"ok":true,"data":{{"schema_version":{schema}}}}}\'; exit 0;; esac\n'
+                     "exit 1\n")
+        p.chmod(0o755)
+
+    def rows(self, settings=None):
+        return {r["name"]: r for r in doctor._tracker_checks(settings or self.settings, None)}
+
+    def test_orbit_tracker_adds_store_health(self):
+        self.orbit()
+        rows = self.rows()
+        for name in ("orbit-binary", "orbit-schema", "orbit-board", "orbit-hold-label"):
+            self.assertEqual(rows[name]["status"], "pass", (name, rows[name]))
+
+    def test_orbit_rows_name_the_fix(self):
+        rows = self.rows()
+        self.assertEqual(rows["orbit-binary"]["status"], "fail")
+        self.assertIn("install orbit", rows["orbit-binary"]["fix"])
+        self.orbit(schema=2)
+        self.assertEqual(self.rows()["orbit-schema"]["fix"],
+                         "orbit export schema_version is 2, kinetic needs 3")
+        self.orbit()
+        self.config.write_text('[board]\nnon_ready_labels = ["needs-triage"]\n')
+        hold = self.rows()["orbit-hold-label"]
+        self.assertEqual(hold["status"], "warn")
+        self.assertIn('add "kinetic" to non_ready_labels', hold["fix"])
+
+    def test_local_tracker_adds_no_store_rows(self):
+        local = self.tmp / "local.json"
+        local.write_text(json.dumps({"tracker": "local"}))
+        self.assertFalse([n for n in self.rows(local) if n.startswith("orbit-")])

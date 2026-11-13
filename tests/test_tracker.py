@@ -134,3 +134,39 @@ class TrackerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrbitTrackerTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.settings = self.tmp / "settings.json"
+
+    def _resolve(self, data):
+        self.settings.write_text(json.dumps(data))
+        return resolve(settings=self.settings)
+
+    def test_orbit_resolves_with_defaults(self):
+        r = self._resolve({"tracker": "orbit"})
+        self.assertEqual(r["tracker"], "orbit")
+        self.assertEqual(r["names"]["hold"], "kinetic")
+        self.assertEqual(r["names"]["run"], "kinetic-run-<run id>")
+        self.assertEqual(r["names"]["kind"]["human"], "ready-for-human")
+        self.assertEqual(r["names"]["ships_with"], "ships-with-<group>")
+
+    def test_orbit_names_override(self):
+        r = self._resolve({"tracker": "orbit", "tracker_names": {"hold": "held-by-run"}})
+        self.assertEqual(r["names"]["hold"], "held-by-run")
+
+    def test_store_record_for_local_trackers(self):
+        from kinetic import ticket_store
+        for tracker in ("github", "jira", "linear", "local", "other"):
+            self.assertEqual(ticket_store.for_tracker(tracker), {"kind": "local"}, tracker)
+
+    def test_store_record_cli(self):
+        from kinetic import tracker
+        self.settings.write_text(json.dumps({"tracker": "local"}))
+        with mock.patch.object(tracker, "DEFAULT_SETTINGS", self.settings), \
+                mock.patch("sys.stdout") as out:
+            self.assertEqual(tracker.main(["store-record"]), 0)
+        printed = "".join(c.args[0] for c in out.write.call_args_list)
+        self.assertEqual(json.loads(printed), {"kind": "local"})
