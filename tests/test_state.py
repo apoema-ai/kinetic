@@ -435,3 +435,54 @@ class HumanTicketTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaneAndRepoTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.run_dir = Path(self._tmp.name) / "run"
+
+    def test_discover_phase_sits_between_grill_and_spec(self):
+        self.assertEqual(state.PHASES.index("discover"), state.PHASES.index("grill") + 1)
+        self.assertEqual(state.PHASES.index("spec"), state.PHASES.index("discover") + 1)
+
+    def test_set_lane_moves_between_feature_and_epic_at_any_phase(self):
+        state.init(self.run_dir, "feature", "X-1")
+        state.set_phase(self.run_dir, "build")
+        self.assertEqual(state.set_lane(self.run_dir, "epic")["lane"], "epic")
+        self.assertEqual(state.set_lane(self.run_dir, "feature")["lane"], "feature")
+
+    def test_set_lane_refuses_quick_both_ways_and_invalid(self):
+        state.init(self.run_dir, "feature", "X-1")
+        with self.assertRaises(ValueError):
+            state.set_lane(self.run_dir, "quick")
+        with self.assertRaises(ValueError):
+            state.set_lane(self.run_dir, "huge")
+        state.init(self.run_dir, "quick", "X-1", force=True)
+        with self.assertRaises(ValueError):
+            state.set_lane(self.run_dir, "epic")
+        self.assertEqual(state.set_lane(self.run_dir, "quick")["lane"], "quick")
+
+    def test_remove_repo_drops_unused_repo(self):
+        state.init(self.run_dir, "epic", "X-1")
+        state.set_repo(self.run_dir, "api", "/w/api", "kinetic/X-1/integration")
+        self.assertNotIn("api", state.remove_repo(self.run_dir, "api")["repos"])
+
+    def test_remove_repo_refused_while_any_ticket_names_it(self):
+        state.init(self.run_dir, "epic", "X-1")
+        state.set_repo(self.run_dir, "api", "/w/api", "kinetic/X-1/integration")
+        state.set_ticket(self.run_dir, "T1", repo="api", blocked_by=[], status="merged")
+        with self.assertRaises(ValueError):
+            state.remove_repo(self.run_dir, "api")
+        with self.assertRaises(ValueError):
+            state.remove_repo(self.run_dir, "web")
+
+    def test_cli_set_lane_and_remove_repo(self):
+        state.init(self.run_dir, "feature", "X-1")
+        state.set_repo(self.run_dir, "api", "/w/api", "kinetic/X-1/integration")
+        self.assertEqual(state.main(["set-lane", "--run", str(self.run_dir), "--lane", "epic"]), 0)
+        self.assertEqual(state.main(["remove-repo", "--run", str(self.run_dir), "--name", "api"]), 0)
+        s = state.load(self.run_dir)
+        self.assertEqual((s["lane"], s["repos"]), ("epic", {}))
+        self.assertEqual(state.main(["set-lane", "--run", str(self.run_dir), "--lane", "quick"]), 1)
